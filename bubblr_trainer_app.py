@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox)
-from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QImage
+from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QImage, QPalette
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF
 
 VERSION = "1.0"
@@ -818,8 +818,47 @@ class TrainerWindow(QMainWindow):
         self._status(self._tr("loaded_proj").format(n=len(pages)))
 
 
+def apply_krita_dark(app):
+    """A dark, flat theme in the spirit of Krita's default 'dark' look:
+    Fusion style + a dark palette (so menus, dialogs, combos and scrollbars are
+    dark too) plus a few accents in Krita's blue."""
+    app.setStyle("Fusion")
+    C = QColor
+    win_bg, base, text = C(0x31, 0x36, 0x3b), C(0x23, 0x26, 0x29), C(0xef, 0xf0, 0xf1)
+    accent, disabled = C(0x3d, 0xae, 0xe9), C(0x7f, 0x8c, 0x8d)
+    p = QPalette()
+    p.setColor(QPalette.Window, win_bg)
+    p.setColor(QPalette.WindowText, text)
+    p.setColor(QPalette.Base, base)
+    p.setColor(QPalette.AlternateBase, win_bg)
+    p.setColor(QPalette.ToolTipBase, win_bg)
+    p.setColor(QPalette.ToolTipText, text)
+    p.setColor(QPalette.Text, text)
+    p.setColor(QPalette.Button, C(0x3a, 0x40, 0x45))
+    p.setColor(QPalette.ButtonText, text)
+    p.setColor(QPalette.BrightText, C(0xff, 0x40, 0x40))
+    p.setColor(QPalette.Link, accent)
+    p.setColor(QPalette.Highlight, accent)
+    p.setColor(QPalette.HighlightedText, base)
+    for role in (QPalette.Text, QPalette.ButtonText, QPalette.WindowText):
+        p.setColor(QPalette.Disabled, role, disabled)
+    app.setPalette(p)
+    app.setStyleSheet(
+        "QToolTip{color:#eff0f1;background:#31363b;border:1px solid #4d4d4d;}"
+        "QPushButton{padding:5px 9px;border:1px solid #4d4d4d;border-radius:3px;"
+        "background:#3a4045;}"
+        "QPushButton:hover{background:#454b50;}"
+        "QPushButton:pressed{background:#2c3135;}"
+        "QPushButton:checked{background:#2f6f9f;border-color:#3daee9;}"
+        "QPushButton:disabled{color:#7f8c8d;background:#33383c;}"
+        "QComboBox{padding:3px 6px;border:1px solid #4d4d4d;border-radius:3px;"
+        "background:#232629;}"
+        "QLabel{color:#eff0f1;}")
+
+
 def main():
     app = QApplication(sys.argv)
+    apply_krita_dark(app)
     win = TrainerWindow()
     win.show()
     sys.exit(app.exec_())
