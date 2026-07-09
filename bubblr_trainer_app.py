@@ -15,7 +15,7 @@ import time
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
-    QMessageBox)
+    QMessageBox, QCheckBox)
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QImage, QPalette
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint
 
@@ -36,6 +36,11 @@ LANG = {
         "zoom_tip": "Wheel = zoom · middle-drag = pan · this button = fit to window",
         "page_none": "no page", "page": "{i} / {n}  -  {name}",
         "edit": "Draw / edit boxes", "set_order": "Set reading order",
+        "auto_order": "Auto order",
+        "auto_order_tip": "Number all bubbles automatically by reading order (fix a few after)",
+        "rtl": "R→L (manga)",
+        "rtl_tip": "Manga reads right-to-left; uncheck for left-to-right",
+        "ranked": "Auto-ranked {n} box(es) - adjust as needed.",
         "delete": "Delete selected", "clear_order": "Clear order",
         "clear": "Clear all page",
         "kind": "New box is:", "bubble": "Bubble", "sfx": "SFX",
@@ -72,6 +77,11 @@ LANG = {
         "zoom_tip": "Rad = Zoom · Mittel-Ziehen = Verschieben · Knopf = einpassen",
         "page_none": "keine Seite", "page": "{i} / {n}  -  {name}",
         "edit": "Boxen zeichnen / bearbeiten", "set_order": "Lesereihenfolge festlegen",
+        "auto_order": "Auto-Reihenfolge",
+        "auto_order_tip": "Alle Bubbles automatisch nach Lesereihenfolge nummerieren (danach nur korrigieren)",
+        "rtl": "R→L (Manga)",
+        "rtl_tip": "Manga liest rechts-nach-links; für links-nach-rechts abwählen",
+        "ranked": "{n} Box(en) automatisch geordnet – bei Bedarf anpassen.",
         "delete": "Ausgewählte löschen", "clear_order": "Reihenfolge löschen",
         "clear": "Seite leeren",
         "kind": "Neue Box ist:", "bubble": "Bubble", "sfx": "SFX",
@@ -128,6 +138,34 @@ def order_data(boxes, img_w, img_h):
             "nw": b["w"] / float(img_w), "nh": b["h"] / float(img_h),
         })
     return {"width": img_w, "height": img_h, "boxes": out}
+
+
+def auto_order(boxes, rtl=True):
+    """Rank the boxes into a reading order automatically: group them into rows
+    (top to bottom), then order within a row right-to-left for manga (rtl) or
+    left-to-right otherwise. Fills each box's 'order'. You only fix the few it
+    gets wrong instead of clicking every bubble."""
+    n = len(boxes)
+    if n == 0:
+        return
+    order_by_y = sorted(range(n),
+                        key=lambda i: boxes[i]["y"] + boxes[i]["h"] / 2.0)
+    heights = sorted(boxes[i]["h"] for i in order_by_y)
+    band = max(1.0, heights[n // 2] * 0.6)     # ~60% of the median height
+    rows = []
+    for i in order_by_y:
+        cy = boxes[i]["y"] + boxes[i]["h"] / 2.0
+        if rows and cy - rows[-1]["anchor"] <= band:
+            rows[-1]["items"].append(i)
+        else:
+            rows.append({"anchor": cy, "items": [i]})
+    rank = 1
+    for row in rows:
+        row["items"].sort(
+            key=lambda i: boxes[i]["x"] + boxes[i]["w"] / 2.0, reverse=rtl)
+        for i in row["items"]:
+            boxes[i]["order"] = rank
+            rank += 1
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +527,14 @@ class TrainerWindow(QMainWindow):
         self.order_btn.setCheckable(True)
         self.order_btn.toggled.connect(self._on_order_toggle)
         tools.addWidget(self.order_btn)
+        self.auto_order_btn = QPushButton(self._tr("auto_order"))
+        self.auto_order_btn.setToolTip(self._tr("auto_order_tip"))
+        self.auto_order_btn.clicked.connect(self.on_auto_order)
+        tools.addWidget(self.auto_order_btn)
+        self.rtl_chk = QCheckBox(self._tr("rtl"))
+        self.rtl_chk.setChecked(True)
+        self.rtl_chk.setToolTip(self._tr("rtl_tip"))
+        tools.addWidget(self.rtl_chk)
         self.del_btn = QPushButton(self._tr("delete"))
         self.del_btn.clicked.connect(self.on_delete)
         tools.addWidget(self.del_btn)
@@ -603,6 +649,10 @@ class TrainerWindow(QMainWindow):
         self.zoom_fit_btn.setToolTip(t("zoom_tip"))
         self.edit_btn.setText(t("edit"))
         self.order_btn.setText(t("set_order"))
+        self.auto_order_btn.setText(t("auto_order"))
+        self.auto_order_btn.setToolTip(t("auto_order_tip"))
+        self.rtl_chk.setText(t("rtl"))
+        self.rtl_chk.setToolTip(t("rtl_tip"))
         self.del_btn.setText(t("delete"))
         self.clear_order_btn.setText(t("clear_order"))
         self.clear_btn.setText(t("clear"))
@@ -734,6 +784,16 @@ class TrainerWindow(QMainWindow):
         self._order_counter = 1
         self._refresh()
         self._status(self._tr("order_cleared"))
+
+    def on_auto_order(self):
+        pg = self._page()
+        if not pg or not pg["boxes"]:
+            self._status(self._tr("no_boxes"), error=True)
+            return
+        auto_order(pg["boxes"], rtl=self.rtl_chk.isChecked())
+        self._order_counter = len(pg["boxes"]) + 1
+        self._refresh()
+        self._status(self._tr("ranked").format(n=len(pg["boxes"])))
 
     def on_delete(self):
         pg = self._page()
