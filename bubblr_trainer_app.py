@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox)
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QImage, QPalette
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint
 
 VERSION = "1.0"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
@@ -32,6 +32,8 @@ LANG = {
                   "No AI here - this only makes the training data."),
         "load": "Load images…",
         "prev": "◀", "next": "▶",
+        "fit": "Fit",
+        "zoom_tip": "Wheel = zoom · middle-drag = pan · this button = fit to window",
         "page_none": "no page", "page": "{i} / {n}  -  {name}",
         "edit": "Draw / edit boxes", "set_order": "Set reading order",
         "delete": "Delete selected", "clear_order": "Clear order",
@@ -66,6 +68,8 @@ LANG = {
                   "Trainingsdaten."),
         "load": "Bilder laden…",
         "prev": "◀", "next": "▶",
+        "fit": "Einpassen",
+        "zoom_tip": "Rad = Zoom · Mittel-Ziehen = Verschieben · Knopf = einpassen",
         "page_none": "keine Seite", "page": "{i} / {n}  -  {name}",
         "edit": "Boxen zeichnen / bearbeiten", "set_order": "Lesereihenfolge festlegen",
         "delete": "Ausgewählte löschen", "clear_order": "Reihenfolge löschen",
@@ -147,6 +151,10 @@ class BoxOverlay(QWidget):
         self._current = -1
         self._edit = False
         self._drag = None
+        self._zoom = 1.0          # 1.0 = fit to the widget
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._panning = None      # last pos while middle-drag panning
         self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
@@ -161,21 +169,64 @@ class BoxOverlay(QWidget):
         self._img = img
         self._doc_w = max(1, doc_w)
         self._doc_h = max(1, doc_h)
-        self.update()
+        self.fit()                # a new page starts fitted
 
     def set_boxes(self, boxes, current=-1):
         self._boxes = boxes
         self._current = current
         self.update()
 
+    def _base_scale(self):
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            return 1.0
+        return min(w / float(self._doc_w), h / float(self._doc_h))
+
     def _target(self):
         w, h = self.width(), self.height()
         if w <= 0 or h <= 0:
             return QRectF(0, 0, 1, 1)
-        scale = min(w / float(self._doc_w), h / float(self._doc_h))
-        tw = self._doc_w * scale
-        th = self._doc_h * scale
-        return QRectF((w - tw) / 2.0, (h - th) / 2.0, tw, th)
+        s = self._base_scale() * self._zoom
+        tw = self._doc_w * s
+        th = self._doc_h * s
+        x = (w - tw) / 2.0 + self._pan_x
+        y = (h - th) / 2.0 + self._pan_y
+        return QRectF(x, y, tw, th)
+
+    # -- zoom / pan --
+    def fit(self):
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self.update()
+
+    def _zoom_at(self, pos, factor):
+        z2 = max(0.1, min(12.0, self._zoom * factor))
+        if abs(z2 - self._zoom) < 1e-9:
+            return
+        w, h = self.width(), self.height()
+        base = self._base_scale()
+        s = base * self._zoom
+        s2 = base * z2
+        cx0 = (w - self._doc_w * s) / 2.0 + self._pan_x
+        cy0 = (h - self._doc_h * s) / 2.0 + self._pan_y
+        ix = (pos.x() - cx0) / s if s else 0.0
+        iy = (pos.y() - cy0) / s if s else 0.0
+        self._pan_x = (pos.x() - ix * s2) - (w - self._doc_w * s2) / 2.0
+        self._pan_y = (pos.y() - iy * s2) - (h - self._doc_h * s2) / 2.0
+        self._zoom = z2
+        self.update()
+
+    def zoom_step(self, factor):
+        self._zoom_at(QPoint(self.width() // 2, self.height() // 2), factor)
+
+    def wheelEvent(self, ev):
+        if self._img is None:
+            return
+        d = ev.angleDelta().y()
+        if d:
+            self._zoom_at(ev.pos(), 1.18 if d > 0 else 1.0 / 1.18)
+        ev.accept()
 
     def paintEvent(self, _ev):
         p = QPainter(self)
@@ -282,6 +333,10 @@ class BoxOverlay(QWidget):
         return self._norm(d["fx"], d["fy"], d["cx"], d["cy"])
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._panning = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            return
         if event.button() == Qt.RightButton:
             idx = self._hit(event.pos())
             if idx >= 0:
@@ -316,12 +371,23 @@ class BoxOverlay(QWidget):
         self.update()
 
     def mouseMoveEvent(self, event):
+        if self._panning is not None:
+            d = event.pos() - self._panning
+            self._pan_x += d.x()
+            self._pan_y += d.y()
+            self._panning = event.pos()
+            self.update()
+            return
         if not self._edit or self._drag is None:
             return
         self._drag["cx"], self._drag["cy"] = self._to_doc(event.pos())
         self.update()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton and self._panning is not None:
+            self._panning = None
+            self.setCursor(Qt.CrossCursor if self._edit else Qt.ArrowCursor)
+            return
         if not self._edit or self._drag is None:
             return
         d, self._drag = self._drag, None
@@ -392,6 +458,19 @@ class TrainerWindow(QMainWindow):
         self.next_btn = QPushButton(self._tr("next"))
         self.next_btn.clicked.connect(lambda: self._goto(self._cur + 1))
         top.addWidget(self.next_btn)
+        top.addSpacing(12)
+        self.zoom_out_btn = QPushButton("−")
+        self.zoom_out_btn.setFixedWidth(32)
+        self.zoom_out_btn.clicked.connect(lambda: self.overlay.zoom_step(1 / 1.25))
+        top.addWidget(self.zoom_out_btn)
+        self.zoom_fit_btn = QPushButton(self._tr("fit"))
+        self.zoom_fit_btn.setToolTip(self._tr("zoom_tip"))
+        self.zoom_fit_btn.clicked.connect(lambda: self.overlay.fit())
+        top.addWidget(self.zoom_fit_btn)
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setFixedWidth(32)
+        self.zoom_in_btn.clicked.connect(lambda: self.overlay.zoom_step(1.25))
+        top.addWidget(self.zoom_in_btn)
         lay.addLayout(top)
 
         self.overlay = BoxOverlay()
@@ -520,6 +599,8 @@ class TrainerWindow(QMainWindow):
         self.load_btn.setText(t("load"))
         self.prev_btn.setText(t("prev"))
         self.next_btn.setText(t("next"))
+        self.zoom_fit_btn.setText(t("fit"))
+        self.zoom_fit_btn.setToolTip(t("zoom_tip"))
         self.edit_btn.setText(t("edit"))
         self.order_btn.setText(t("set_order"))
         self.del_btn.setText(t("delete"))

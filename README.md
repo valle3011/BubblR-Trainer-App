@@ -25,6 +25,8 @@ just want to label images.
 
 1. **Load images…** — pick one or many manga page images (PNG/JPG/…). They become
    pages you can step through with ◀ / ▶.
+   - **Zoom**: mouse wheel (zooms around the cursor). **Pan**: drag with the
+     middle mouse button. **Fit** button resets to fit-the-window.
 2. Turn on **Draw / edit boxes**:
    - drag on empty space = new box,
    - drag inside a box = move,
