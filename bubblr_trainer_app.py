@@ -1322,8 +1322,12 @@ class TrainerWindow(QMainWindow):
         paths, _f = QFileDialog.getOpenFileNames(
             self, self._tr("load"), self._folder or os.path.expanduser("~"),
             self._tr("img_filter"))
-        if not paths:
-            return
+        if paths:
+            self.add_image_paths(paths)
+
+    def add_image_paths(self, paths):
+        """Load the given image files as pages (used by the file dialog and by
+        image paths passed on the command line). Returns how many were added."""
         added = 0
         for p in paths:
             img = QImage(p)
@@ -1342,6 +1346,7 @@ class TrainerWindow(QMainWindow):
             else:
                 self._refresh()
             self._status(self._tr("loaded").format(n=added))
+        return added
 
     def on_choose_folder(self):
         path = QFileDialog.getExistingDirectory(
@@ -1514,6 +1519,13 @@ def main():
     apply_krita_dark(app)
     win = TrainerWindow()
     win.show()
+    # image paths passed on the command line open straight away as pages
+    # (used by "Open in BubblR Trainer" in the BubblR AI ranking tool)
+    args = [a for a in app.arguments()[1:]
+            if a.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp"))
+            and os.path.isfile(a)]
+    if args:
+        win.add_image_paths(args)
     sys.exit(app.exec_())
 
 

@@ -19,6 +19,6 @@ if errorlevel 1 (
   python -m pip install PyQt5
 )
 
-python bubblr_trainer_app.py
+python bubblr_trainer_app.py %*
 if errorlevel 1 pause
 endlocal
