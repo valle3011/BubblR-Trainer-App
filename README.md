@@ -27,6 +27,11 @@ just want to label images.
    pages you can step through with ◀ / ▶.
    - **Zoom**: mouse wheel (zooms around the cursor). **Pan**: drag with the
      middle mouse button. **Fit** button resets to fit-the-window.
+   - **Close pages** when you're done with them (no need to quit the app):
+     **✕ Close page** (**Ctrl+W**) drops the current page, **Close all** clears
+     everything. This only removes them from the session — the image files on
+     disk are never touched. You're asked to confirm if a page still has boxes
+     you haven't exported.
    - **Rank the pages for labelling**: the **Sort pages** dropdown reorders the
      loaded pages — *by name*, *unlabelled first*, *fewest boxes first*, or
      *most boxes first* — so you always know what to do next. **Next unlabelled**

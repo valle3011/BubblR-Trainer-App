@@ -21,7 +21,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
 
-VERSION = "1.2"
+VERSION = "1.3"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -76,6 +76,18 @@ LANG = {
         "nothing_redo": "Nothing to redo.",
         "undone": "Undone.",
         "redone": "Redone.",
+        "close_page": "✕ Close page",
+        "close_page_tip": "Remove this page from the session (Ctrl+W). The image "
+                          "file on disk is not touched.",
+        "close_all": "Close all",
+        "close_all_tip": "Remove every loaded page from the session.",
+        "confirm_title": "Close page",
+        "confirm_close": "\"{name}\" has {n} box(es) that are not exported.\n\n"
+                         "Close this page and discard them?",
+        "confirm_close_all": "{p} page(s) hold {n} box(es) that are not "
+                             "exported.\n\nClose all pages and discard them?",
+        "closed": "Page closed.",
+        "closed_all": "All pages closed.",
         "save": "Save project…", "load_proj": "Load project…",
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
@@ -145,6 +157,18 @@ LANG = {
         "nothing_redo": "Nichts wiederherzustellen.",
         "undone": "Rückgängig gemacht.",
         "redone": "Wiederhergestellt.",
+        "close_page": "✕ Seite schließen",
+        "close_page_tip": "Diese Seite aus der Sitzung entfernen (Strg+W). Die "
+                          "Bilddatei auf der Festplatte bleibt unberührt.",
+        "close_all": "Alle schließen",
+        "close_all_tip": "Alle geladenen Seiten aus der Sitzung entfernen.",
+        "confirm_title": "Seite schließen",
+        "confirm_close": "„{name}“ hat {n} Box(en), die nicht exportiert sind.\n\n"
+                         "Diese Seite schließen und verwerfen?",
+        "confirm_close_all": "{p} Seite(n) mit {n} Box(en), die nicht exportiert "
+                             "sind.\n\nAlle Seiten schließen und verwerfen?",
+        "closed": "Seite geschlossen.",
+        "closed_all": "Alle Seiten geschlossen.",
         "save": "Projekt speichern…", "load_proj": "Projekt laden…",
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
@@ -725,6 +749,14 @@ class TrainerWindow(QMainWindow):
         self.next_btn = QPushButton(self._tr("next"))
         self.next_btn.clicked.connect(lambda: self._goto(self._cur + 1))
         top.addWidget(self.next_btn)
+        self.close_btn = QPushButton(self._tr("close_page"))
+        self.close_btn.setToolTip(self._tr("close_page_tip"))
+        self.close_btn.clicked.connect(self.on_close_page)
+        top.addWidget(self.close_btn)
+        self.close_all_btn = QPushButton(self._tr("close_all"))
+        self.close_all_btn.setToolTip(self._tr("close_all_tip"))
+        self.close_all_btn.clicked.connect(self.on_close_all)
+        top.addWidget(self.close_all_btn)
         top.addSpacing(12)
         self.zoom_out_btn = QPushButton("−")
         self.zoom_out_btn.setFixedWidth(32)
@@ -888,6 +920,7 @@ class TrainerWindow(QMainWindow):
         QShortcut(QKeySequence.Undo, self, activated=self.undo)          # Ctrl+Z
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self.redo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
+        QShortcut(QKeySequence("Ctrl+W"), self, activated=self.on_close_page)
         self._update_undo_buttons()
 
         self._refresh_folder_label()
@@ -940,6 +973,10 @@ class TrainerWindow(QMainWindow):
         self.redo_btn.setToolTip(t("redo_tip"))
         self.prev_btn.setText(t("prev"))
         self.next_btn.setText(t("next"))
+        self.close_btn.setText(t("close_page"))
+        self.close_btn.setToolTip(t("close_page_tip"))
+        self.close_all_btn.setText(t("close_all"))
+        self.close_all_btn.setToolTip(t("close_all_tip"))
         self.zoom_fit_btn.setText(t("fit"))
         self.zoom_fit_btn.setToolTip(t("zoom_tip"))
         self.edit_btn.setText(t("edit"))
@@ -1114,6 +1151,50 @@ class TrainerWindow(QMainWindow):
                 self._goto(idx)
                 return
         self._status(self._tr("all_labelled"))
+
+    # -- closing pages --
+    def on_close_page(self):
+        """Remove the current page from the session (does not touch files)."""
+        pg = self._page()
+        if not pg:
+            return
+        if pg["boxes"] and not self._confirm_discard(
+                self._tr("confirm_close").format(n=len(pg["boxes"]),
+                                                 name=pg["name"])):
+            return
+        del self._pages[self._cur]
+        self._after_pages_removed()
+        self._status(self._tr("closed"))
+
+    def on_close_all(self):
+        """Remove every loaded page from the session."""
+        if not self._pages:
+            return
+        total_boxes = sum(len(p["boxes"]) for p in self._pages)
+        if total_boxes and not self._confirm_discard(
+                self._tr("confirm_close_all").format(p=len(self._pages),
+                                                     n=total_boxes)):
+            return
+        self._pages = []
+        self._after_pages_removed()
+        self._status(self._tr("closed_all"))
+
+    def _confirm_discard(self, msg):
+        return QMessageBox.question(
+            self, self._tr("confirm_title"), msg,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+
+    def _after_pages_removed(self):
+        """Re-anchor the view after one or all pages were closed."""
+        self._reset_history()             # page indices changed -> history stale
+        if not self._pages:
+            self._cur = -1
+            self._current = -1
+            self.overlay.set_page(QImage(), 0, 0)   # blank the canvas
+            self._refresh()
+        else:
+            self._cur = max(0, min(self._cur, len(self._pages) - 1))
+            self._goto(self._cur)
 
     # -- overlay callbacks --
     def _on_box_added(self, x, y, w, h, shape="rect", points=None):
