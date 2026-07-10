@@ -7,6 +7,7 @@ reading order, and export a YOLO dataset. No Krita, no Photoshop.
 
 Run:  python bubblr_trainer_app.py     (needs Python 3 + PyQt5)
 """
+import copy
 import json
 import os
 import sys
@@ -15,11 +16,12 @@ import time
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
-    QMessageBox, QCheckBox)
-from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QImage, QPalette
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint
+    QMessageBox, QCheckBox, QSpinBox, QShortcut)
+from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
+                         QPalette, QPolygonF, QKeySequence)
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
 
-VERSION = "1.0"
+VERSION = "1.2"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -45,7 +47,35 @@ LANG = {
         "clear": "Clear all page",
         "kind": "New box is:", "bubble": "Bubble", "sfx": "SFX",
         "relabel": "(click a box first to relabel it)",
-        "counts": "This page - Bubbles: {b}   SFX: {s}   |   Pages: {p}",
+        "counts": "This page - Bubbles: {b}   SFX: {s}   |   Pages: {done}/{p} labelled",
+        "sort_by": "Sort pages:",
+        "sort_name": "by name",
+        "sort_unlabeled": "unlabelled first",
+        "sort_fewest": "fewest boxes first",
+        "sort_most": "most boxes first",
+        "next_todo": "Next unlabelled",
+        "all_labelled": "All pages have at least one box.",
+        "tool": "Tool:",
+        "tool_rect": "▭ Rectangle",
+        "tool_ellipse": "◯ Ellipse",
+        "tool_lasso": "✎ Lasso",
+        "tool_wand": "✨ Magic wand",
+        "tool_rect_hint": "Drag a rectangle corner-to-corner.",
+        "tool_ellipse_hint": "Drag an ellipse; the box is its bounding rectangle.",
+        "tool_lasso_hint": "Draw a freehand outline; the box wraps around it.",
+        "tool_wand_hint": "Click inside a bubble to auto-detect its region.",
+        "wand_tol": "Wand tol.",
+        "wand_tol_tip": "Magic-wand colour tolerance (higher = grabs more).",
+        "center_marker": "Centre marker",
+        "center_marker_tip": "Show a cross + dot at the centre of every marking.",
+        "undo": "↶ Undo",
+        "redo": "↷ Redo",
+        "undo_tip": "Undo the last change (Ctrl+Z)",
+        "redo_tip": "Redo (Ctrl+Y or Ctrl+Shift+Z)",
+        "nothing_undo": "Nothing to undo.",
+        "nothing_redo": "Nothing to redo.",
+        "undone": "Undone.",
+        "redone": "Redone.",
         "save": "Save project…", "load_proj": "Load project…",
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
@@ -86,7 +116,35 @@ LANG = {
         "clear": "Seite leeren",
         "kind": "Neue Box ist:", "bubble": "Bubble", "sfx": "SFX",
         "relabel": "(erst eine Box anklicken, um sie umzulabeln)",
-        "counts": "Diese Seite – Bubbles: {b}   SFX: {s}   |   Seiten: {p}",
+        "counts": "Diese Seite – Bubbles: {b}   SFX: {s}   |   Seiten: {done}/{p} gelabelt",
+        "sort_by": "Seiten sortieren:",
+        "sort_name": "nach Name",
+        "sort_unlabeled": "ungelabelte zuerst",
+        "sort_fewest": "wenigste Boxen zuerst",
+        "sort_most": "meiste Boxen zuerst",
+        "next_todo": "Nächste ungelabelte",
+        "all_labelled": "Alle Seiten haben mindestens eine Box.",
+        "tool": "Werkzeug:",
+        "tool_rect": "▭ Rechteck",
+        "tool_ellipse": "◯ Ellipse",
+        "tool_lasso": "✎ Lasso",
+        "tool_wand": "✨ Zauberstab",
+        "tool_rect_hint": "Rechteck von Ecke zu Ecke ziehen.",
+        "tool_ellipse_hint": "Ellipse ziehen; die Box ist ihr umschließendes Rechteck.",
+        "tool_lasso_hint": "Freihand-Umriss zeichnen; die Box umschließt ihn.",
+        "tool_wand_hint": "In eine Blase klicken, um ihren Bereich automatisch zu erkennen.",
+        "wand_tol": "Zauberst.-Tol.",
+        "wand_tol_tip": "Farbtoleranz des Zauberstabs (höher = erfasst mehr).",
+        "center_marker": "Mittelpunkt",
+        "center_marker_tip": "Kreuz + Punkt in der Mitte jeder Markierung anzeigen.",
+        "undo": "↶ Rückgängig",
+        "redo": "↷ Wiederh.",
+        "undo_tip": "Letzte Änderung rückgängig (Strg+Z)",
+        "redo_tip": "Wiederherstellen (Strg+Y oder Umschalt+Strg+Z)",
+        "nothing_undo": "Nichts rückgängig zu machen.",
+        "nothing_redo": "Nichts wiederherzustellen.",
+        "undone": "Rückgängig gemacht.",
+        "redone": "Wiederhergestellt.",
         "save": "Projekt speichern…", "load_proj": "Projekt laden…",
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
@@ -175,7 +233,8 @@ def auto_order(boxes, rtl=True):
 class BoxOverlay(QWidget):
     boxClicked = pyqtSignal(int)
     boxRemoved = pyqtSignal(int)
-    boxAdded = pyqtSignal(float, float, float, float)
+    # x, y, w, h, shape ("rect"/"ellipse"/"lasso"/"wand"), points (list or None)
+    boxAdded = pyqtSignal(float, float, float, float, str, object)
     boxChanged = pyqtSignal(int, float, float, float, float)
 
     _HANDLE = 9
@@ -193,6 +252,9 @@ class BoxOverlay(QWidget):
         self._pan_x = 0.0
         self._pan_y = 0.0
         self._panning = None      # last pos while middle-drag panning
+        self._tool = "rect"       # rect | ellipse | lasso | wand
+        self._show_center = True  # draw a marker at each box's centre
+        self._wand_tol = 40       # magic-wand colour tolerance (0..255)
         self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
@@ -202,6 +264,19 @@ class BoxOverlay(QWidget):
         self._drag = None
         self.setCursor(Qt.CrossCursor if on else Qt.ArrowCursor)
         self.update()
+
+    def set_tool(self, name):
+        if name in ("rect", "ellipse", "lasso", "wand"):
+            self._tool = name
+            self._drag = None
+            self.update()
+
+    def set_center_marker(self, on):
+        self._show_center = bool(on)
+        self.update()
+
+    def set_wand_tolerance(self, value):
+        self._wand_tol = max(1, min(255, int(value)))
 
     def set_page(self, img, doc_w, doc_h):
         self._img = img
@@ -287,7 +362,10 @@ class BoxOverlay(QWidget):
                                            KIND_COLOR["bubble"]))
             p.setPen(QPen(color, 3 if k == self._current else 2))
             p.setBrush(Qt.NoBrush)
-            p.drawRect(r)
+            self._draw_shape(p, r, b.get("shape", "rect"),
+                             b.get("points"), t, scale)
+            if self._show_center:
+                self._draw_center(p, r.center(), color, big=(k == self._current))
             order = b.get("order", 0)
             label = str(order) if order else ("B" if b.get("kind") != "sfx" else "S")
             badge = QRectF(r.x(), r.y(), max(18, 8 + 8 * len(label)), 16)
@@ -300,6 +378,7 @@ class BoxOverlay(QWidget):
                 for hx, hy in ((r.left(), r.top()), (r.right(), r.top()),
                                (r.left(), r.bottom()), (r.right(), r.bottom())):
                     p.drawRect(QRectF(hx - 3, hy - 3, 6, 6))
+        # live preview of the shape being drawn
         rect = self._rect_of(self._drag) if self._drag else None
         if rect is not None:
             x, y, w, h = rect
@@ -307,8 +386,49 @@ class BoxOverlay(QWidget):
                         w * scale, h * scale)
             p.setPen(QPen(QColor(60, 200, 90), 2, Qt.DashLine))
             p.setBrush(QBrush(Qt.NoBrush))
-            p.drawRect(pr)
+            shape = self._drag.get("shape", "rect")
+            pts = self._drag.get("pts")
+            self._draw_shape(p, pr, shape, pts, t, scale, closed=False)
+            # centre marker + live size read-out while marking
+            c = pr.center()
+            self._draw_center(p, c, QColor(60, 200, 90), big=True)
+            p.setPen(QPen(QColor(20, 40, 20)))
+            info = "%d x %d" % (int(round(w)), int(round(h)))
+            tag = QRectF(c.x() + 8, c.y() + 8, 8 + 7 * len(info), 15)
+            p.fillRect(tag, QColor(60, 200, 90))
+            p.setPen(QPen(QColor(255, 255, 255)))
+            p.drawText(tag, Qt.AlignCenter, info)
         p.end()
+
+    def _draw_shape(self, p, r, shape, points, t, scale, closed=True):
+        """Outline a box as a rectangle, ellipse or lasso polygon."""
+        if shape == "ellipse":
+            p.drawEllipse(r)
+        elif shape == "lasso" and points:
+            poly = QPolygonF([QPointF(t.x() + px * scale, t.y() + py * scale)
+                              for px, py in points])
+            if closed:
+                p.drawPolygon(poly)
+            else:
+                p.drawPolyline(poly)
+        else:
+            p.drawRect(r)
+
+    def _draw_center(self, p, c, color, big=False):
+        """Draw a small cross + dot at the centre of a marking."""
+        arm = 9 if big else 5
+        pen = QPen(QColor(255, 255, 255), 3 if big else 2)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(pen)
+        p.drawLine(QPointF(c.x() - arm, c.y()), QPointF(c.x() + arm, c.y()))
+        p.drawLine(QPointF(c.x(), c.y() - arm), QPointF(c.x(), c.y() + arm))
+        p.setPen(QPen(color, 1 if big else 1))
+        p.drawLine(QPointF(c.x() - arm, c.y()), QPointF(c.x() + arm, c.y()))
+        p.drawLine(QPointF(c.x(), c.y() - arm), QPointF(c.x(), c.y() + arm))
+        p.setBrush(QBrush(color))
+        p.setPen(QPen(QColor(255, 255, 255), 1))
+        rad = 3.0 if big else 2.0
+        p.drawEllipse(c, rad, rad)
 
     def _hit(self, pos):
         t = self._target()
@@ -364,11 +484,25 @@ class BoxOverlay(QWidget):
         if not d:
             return None
         if d["mode"] == "new":
+            if d.get("shape") == "lasso":
+                pts = d.get("pts") or []
+                if not pts:
+                    return None
+                xs = [px for px, _ in pts]
+                ys = [py for _, py in pts]
+                return (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
             return self._norm(d["x0"], d["y0"], d["cx"], d["cy"])
         if d["mode"] == "move":
             return (d["bx"] + (d["cx"] - d["px"]),
                     d["by"] + (d["cy"] - d["py"]), d["bw"], d["bh"])
         return self._norm(d["fx"], d["fy"], d["cx"], d["cy"])
+
+    def _clamp(self, x, y, w, h):
+        x = max(0.0, min(x, self._doc_w - 1))
+        y = max(0.0, min(y, self._doc_h - 1))
+        w = min(w, self._doc_w - x)
+        h = min(h, self._doc_h - y)
+        return x, y, w, h
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MiddleButton:
@@ -392,20 +526,37 @@ class BoxOverlay(QWidget):
     def _begin_edit(self, pos):
         dx, dy = self._to_doc(pos)
         hit = self._handle_at(pos)
-        if hit is None:
-            self._drag = {"mode": "new", "x0": dx, "y0": dy, "cx": dx, "cy": dy}
-        elif hit[1] == "move":
-            b = self._boxes[hit[0]]
-            self._drag = {"mode": "move", "idx": hit[0], "bx": b["x"],
-                          "by": b["y"], "bw": b["w"], "bh": b["h"],
-                          "px": dx, "py": dy, "cx": dx, "cy": dy}
-        else:
+        # resizing an existing box (grabbing a corner) always wins
+        if hit is not None and hit[1] != "move":
             idx, corner = hit
             b = self._boxes[idx]
             fx = b["x"] + b["w"] if corner in ("nw", "sw") else b["x"]
             fy = b["y"] + b["h"] if corner in ("nw", "ne") else b["y"]
             self._drag = {"mode": "resize", "idx": idx, "fx": fx, "fy": fy,
-                          "cx": dx, "cy": dy}
+                          "cx": dx, "cy": dy, "obx": b["x"], "oby": b["y"],
+                          "obw": b["w"], "obh": b["h"]}
+            self.update()
+            return
+        if self._tool == "wand":
+            bbox = self._magic_wand(dx, dy)
+            self._drag = None
+            if bbox:
+                x, y, w, h = self._clamp(*bbox)
+                if w >= 4 and h >= 4:
+                    self.boxAdded.emit(x, y, w, h, "wand", None)
+            self.update()
+            return
+        if hit is not None and hit[1] == "move":
+            b = self._boxes[hit[0]]
+            self._drag = {"mode": "move", "idx": hit[0], "bx": b["x"],
+                          "by": b["y"], "bw": b["w"], "bh": b["h"],
+                          "px": dx, "py": dy, "cx": dx, "cy": dy}
+        elif self._tool == "lasso":
+            self._drag = {"mode": "new", "shape": "lasso",
+                          "pts": [(dx, dy)], "cx": dx, "cy": dy}
+        else:
+            self._drag = {"mode": "new", "shape": self._tool,
+                          "x0": dx, "y0": dy, "cx": dx, "cy": dy}
         self.update()
 
     def mouseMoveEvent(self, event):
@@ -418,7 +569,13 @@ class BoxOverlay(QWidget):
             return
         if not self._edit or self._drag is None:
             return
-        self._drag["cx"], self._drag["cy"] = self._to_doc(event.pos())
+        dx, dy = self._to_doc(event.pos())
+        self._drag["cx"], self._drag["cy"] = dx, dy
+        if self._drag.get("shape") == "lasso" and self._drag.get("pts") is not None:
+            pts = self._drag["pts"]
+            # keep the point list small: only record noticeable movement
+            if not pts or abs(dx - pts[-1][0]) + abs(dy - pts[-1][1]) >= 2:
+                pts.append((dx, dy))
         self.update()
 
     def mouseReleaseEvent(self, event):
@@ -436,14 +593,74 @@ class BoxOverlay(QWidget):
         x, y, w, h = rect
         if w < 8 or h < 8:
             return
-        x = max(0.0, min(x, self._doc_w - 1))
-        y = max(0.0, min(y, self._doc_h - 1))
-        w = min(w, self._doc_w - x)
-        h = min(h, self._doc_h - y)
+        x, y, w, h = self._clamp(x, y, w, h)
         if d["mode"] == "new":
-            self.boxAdded.emit(x, y, w, h)
+            shape = d.get("shape", "rect")
+            points = None
+            if shape == "lasso":
+                points = [[round(px, 1), round(py, 1)] for px, py in d.get("pts", [])]
+                if len(points) < 3:
+                    return
+            self.boxAdded.emit(x, y, w, h, shape, points)
         else:
             self.boxChanged.emit(d["idx"], x, y, w, h)
+
+    def _magic_wand(self, dx, dy):
+        """Flood-fill a same-colour region from (dx, dy); return its bbox."""
+        img = self._img
+        if img is None or img.isNull():
+            return None
+        w, h = img.width(), img.height()
+        sx, sy = int(round(dx)), int(round(dy))
+        if not (0 <= sx < w and 0 <= sy < h):
+            return None
+        conv = img.convertToFormat(QImage.Format_RGB32)
+        bpl = conv.bytesPerLine()
+        ptr = conv.bits()
+        ptr.setsize(bpl * h)
+        data = bytes(ptr)              # little-endian 0xAARRGGBB -> B, G, R, A
+        o0 = sy * bpl + sx * 4
+        sr, sg, sb = data[o0 + 2], data[o0 + 1], data[o0]
+        tol = self._wand_tol
+        visited = bytearray(w * h)
+        cap = min(w * h, 4000000)      # guard against flooding a whole flat page
+        count = 0
+        minx = maxx = sx
+        miny = maxy = sy
+        stack = [(sx, sy)]
+        visited[sy * w + sx] = 1
+        while stack:
+            x, y = stack.pop()
+            o = y * bpl + x * 4
+            if abs(data[o + 2] - sr) > tol or abs(data[o + 1] - sg) > tol \
+                    or abs(data[o] - sb) > tol:
+                continue
+            count += 1
+            if count > cap:
+                break
+            if x < minx:
+                minx = x
+            elif x > maxx:
+                maxx = x
+            if y < miny:
+                miny = y
+            elif y > maxy:
+                maxy = y
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if 0 <= nx < w and 0 <= ny < h:
+                    i = ny * w + nx
+                    if not visited[i]:
+                        visited[i] = 1
+                        stack.append((nx, ny))
+        if maxx - minx < 3 or maxy - miny < 3:
+            return None
+        pad = 2
+        minx = max(0, minx - pad)
+        miny = max(0, miny - pad)
+        maxx = min(w - 1, maxx + pad)
+        maxy = min(h - 1, maxy + pad)
+        return (float(minx), float(miny),
+                float(maxx - minx + 1), float(maxy - miny + 1))
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +678,8 @@ class TrainerWindow(QMainWindow):
         self._new_kind = "bubble"
         self._order_mode = False
         self._order_counter = 1
+        self._undo = []           # snapshots of (page index, boxes, selection)
+        self._redo = []
 
         root = QWidget()
         lay = QVBoxLayout()
@@ -485,6 +704,16 @@ class TrainerWindow(QMainWindow):
         self.load_btn = QPushButton(self._tr("load"))
         self.load_btn.clicked.connect(self.on_load_images)
         top.addWidget(self.load_btn)
+        self.lbl_sort = QLabel(self._tr("sort_by"))
+        top.addWidget(self.lbl_sort)
+        self.sort_combo = QComboBox()
+        for _k in ("name", "unlabeled", "fewest", "most"):
+            self.sort_combo.addItem(self._tr("sort_" + _k), _k)
+        self.sort_combo.currentIndexChanged.connect(self._sort_pages)
+        top.addWidget(self.sort_combo)
+        self.next_todo_btn = QPushButton(self._tr("next_todo"))
+        self.next_todo_btn.clicked.connect(self.on_next_todo)
+        top.addWidget(self.next_todo_btn)
         top.addStretch(1)
         self.prev_btn = QPushButton(self._tr("prev"))
         self.prev_btn.clicked.connect(lambda: self._goto(self._cur - 1))
@@ -518,7 +747,50 @@ class TrainerWindow(QMainWindow):
         self.overlay.boxClicked.connect(self._on_box_clicked)
         lay.addWidget(self.overlay, 1)
 
+        shape_row = QHBoxLayout()
+        self.lbl_tool = QLabel(self._tr("tool"))
+        shape_row.addWidget(self.lbl_tool)
+        self._tg = QButtonGroup(self)
+        self._tg.setExclusive(True)
+        self.tool_btns = {}
+        for _key in ("rect", "ellipse", "lasso", "wand"):
+            btn = QPushButton(self._tr("tool_" + _key))
+            btn.setCheckable(True)
+            btn.setToolTip(self._tr("tool_" + _key + "_hint"))
+            btn.clicked.connect(lambda _c, k=_key: self._on_tool(k))
+            btn.setStyleSheet("QPushButton:checked{background:#3daee9;color:white;}")
+            self._tg.addButton(btn)
+            shape_row.addWidget(btn)
+            self.tool_btns[_key] = btn
+        self.tool_btns["rect"].setChecked(True)
+        shape_row.addSpacing(10)
+        self.lbl_tol = QLabel(self._tr("wand_tol"))
+        shape_row.addWidget(self.lbl_tol)
+        self.tol_spin = QSpinBox()
+        self.tol_spin.setRange(1, 255)
+        self.tol_spin.setValue(40)
+        self.tol_spin.setFixedWidth(58)
+        self.tol_spin.setToolTip(self._tr("wand_tol_tip"))
+        self.tol_spin.valueChanged.connect(self.overlay.set_wand_tolerance)
+        shape_row.addWidget(self.tol_spin)
+        shape_row.addSpacing(10)
+        self.center_chk = QCheckBox(self._tr("center_marker"))
+        self.center_chk.setChecked(True)
+        self.center_chk.setToolTip(self._tr("center_marker_tip"))
+        self.center_chk.toggled.connect(self.overlay.set_center_marker)
+        shape_row.addWidget(self.center_chk)
+        shape_row.addStretch(1)
+        lay.addLayout(shape_row)
+
         tools = QHBoxLayout()
+        self.undo_btn = QPushButton(self._tr("undo"))
+        self.undo_btn.setToolTip(self._tr("undo_tip"))
+        self.undo_btn.clicked.connect(self.undo)
+        tools.addWidget(self.undo_btn)
+        self.redo_btn = QPushButton(self._tr("redo"))
+        self.redo_btn.setToolTip(self._tr("redo_tip"))
+        self.redo_btn.clicked.connect(self.redo)
+        tools.addWidget(self.redo_btn)
         self.edit_btn = QPushButton(self._tr("edit"))
         self.edit_btn.setCheckable(True)
         self.edit_btn.toggled.connect(self._on_edit_toggle)
@@ -611,6 +883,13 @@ class TrainerWindow(QMainWindow):
         self.setCentralWidget(root)
         self.setWindowTitle(self._tr("title") + " v" + VERSION)
         self.resize(760, 720)
+
+        # undo / redo keyboard shortcuts
+        QShortcut(QKeySequence.Undo, self, activated=self.undo)          # Ctrl+Z
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self.redo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
+        self._update_undo_buttons()
+
         self._refresh_folder_label()
         self._refresh()
 
@@ -643,6 +922,22 @@ class TrainerWindow(QMainWindow):
         self.setWindowTitle(t("title") + " v" + VERSION)
         self.lbl_intro.setText(t("intro"))
         self.load_btn.setText(t("load"))
+        self.lbl_sort.setText(t("sort_by"))
+        for i, _k in enumerate(("name", "unlabeled", "fewest", "most")):
+            self.sort_combo.setItemText(i, t("sort_" + _k))
+        self.next_todo_btn.setText(t("next_todo"))
+        self.lbl_tool.setText(t("tool"))
+        for _k, _btn in self.tool_btns.items():
+            _btn.setText(t("tool_" + _k))
+            _btn.setToolTip(t("tool_" + _k + "_hint"))
+        self.lbl_tol.setText(t("wand_tol"))
+        self.tol_spin.setToolTip(t("wand_tol_tip"))
+        self.center_chk.setText(t("center_marker"))
+        self.center_chk.setToolTip(t("center_marker_tip"))
+        self.undo_btn.setText(t("undo"))
+        self.undo_btn.setToolTip(t("undo_tip"))
+        self.redo_btn.setText(t("redo"))
+        self.redo_btn.setToolTip(t("redo_tip"))
         self.prev_btn.setText(t("prev"))
         self.next_btn.setText(t("next"))
         self.zoom_fit_btn.setText(t("fit"))
@@ -682,8 +977,9 @@ class TrainerWindow(QMainWindow):
         self.overlay.set_boxes(boxes, getattr(self, "_current", -1))
         b = sum(1 for x in boxes if x.get("kind") != "sfx")
         s = sum(1 for x in boxes if x.get("kind") == "sfx")
+        done = sum(1 for p in self._pages if p["boxes"])
         self.lbl_counts.setText(self._tr("counts").format(
-            b=b, s=s, p=len(self._pages)))
+            b=b, s=s, p=len(self._pages), done=done))
         if pg:
             self.page_lbl.setText(self._tr("page").format(
                 i=self._cur + 1, n=len(self._pages), name=pg["name"]))
@@ -699,13 +995,80 @@ class TrainerWindow(QMainWindow):
         self._new_kind = kind
         cur = getattr(self, "_current", -1)
         pg = self._page()
-        if pg and 0 <= cur < len(pg["boxes"]):
+        if pg and 0 <= cur < len(pg["boxes"]) and \
+                pg["boxes"][cur].get("kind") != kind:
+            self._push_undo()
             pg["boxes"][cur]["kind"] = kind
             self._refresh()
 
     def _set_kind_buttons(self, kind):
         self.bubble_btn.setChecked(kind != "sfx")
         self.sfx_btn.setChecked(kind == "sfx")
+
+    # -- undo / redo --
+    def _push_undo(self):
+        """Snapshot the current page's boxes before a change; clears redo."""
+        pg = self._page()
+        if pg is None:
+            return
+        self._undo.append((self._cur, copy.deepcopy(pg["boxes"]),
+                           getattr(self, "_current", -1)))
+        if len(self._undo) > 120:
+            self._undo.pop(0)
+        self._redo.clear()
+        self._update_undo_buttons()
+
+    def _capture(self, idx):
+        """A snapshot of the boxes on page `idx` as it is right now."""
+        if not (0 <= idx < len(self._pages)):
+            return (idx, [], -1)
+        cur = getattr(self, "_current", -1) if idx == self._cur else -1
+        return (idx, copy.deepcopy(self._pages[idx]["boxes"]), cur)
+
+    def _restore(self, snap):
+        idx, boxes, cur = snap
+        if not (0 <= idx < len(self._pages)):
+            return
+        if idx != self._cur:
+            self._cur = idx
+            pg = self._pages[idx]
+            self.overlay.set_page(pg["img"], pg["img"].width(),
+                                  pg["img"].height())
+        self._pages[idx]["boxes"] = boxes
+        n = len(boxes)
+        self._current = cur if isinstance(cur, int) and 0 <= cur < n else -1
+        self._order_counter = max([b.get("order", 0) for b in boxes] + [0]) + 1
+        self._refresh()
+
+    def _reset_history(self):
+        self._undo = []
+        self._redo = []
+        self._update_undo_buttons()
+
+    def _update_undo_buttons(self):
+        if hasattr(self, "undo_btn"):
+            self.undo_btn.setEnabled(bool(self._undo))
+            self.redo_btn.setEnabled(bool(self._redo))
+
+    def undo(self):
+        if not self._undo:
+            self._status(self._tr("nothing_undo"))
+            return
+        snap = self._undo.pop()
+        self._redo.append(self._capture(snap[0]))
+        self._restore(snap)
+        self._update_undo_buttons()
+        self._status(self._tr("undone"))
+
+    def redo(self):
+        if not self._redo:
+            self._status(self._tr("nothing_redo"))
+            return
+        snap = self._redo.pop()
+        self._undo.append(self._capture(snap[0]))
+        self._restore(snap)
+        self._update_undo_buttons()
+        self._status(self._tr("redone"))
 
     # -- page navigation --
     def _goto(self, idx):
@@ -717,28 +1080,79 @@ class TrainerWindow(QMainWindow):
         self.overlay.set_page(pg["img"], pg["img"].width(), pg["img"].height())
         self._refresh()
 
+    def _sort_pages(self):
+        """Rank the loaded pages for labelling, keeping the current one visible."""
+        if not self._pages:
+            return
+        cur_page = self._page()
+        key = self.sort_combo.currentData() or "name"
+
+        def nboxes(p):
+            return len(p["boxes"])
+
+        if key == "unlabeled":
+            self._pages.sort(key=lambda p: (nboxes(p) > 0, p["name"].lower()))
+        elif key == "fewest":
+            self._pages.sort(key=lambda p: (nboxes(p), p["name"].lower()))
+        elif key == "most":
+            self._pages.sort(key=lambda p: (-nboxes(p), p["name"].lower()))
+        else:  # "name"
+            self._pages.sort(key=lambda p: p["name"].lower())
+
+        if cur_page in self._pages:
+            self._cur = self._pages.index(cur_page)
+        self._refresh()
+
+    def on_next_todo(self):
+        """Jump to the next page that has no boxes yet (wraps around)."""
+        n = len(self._pages)
+        if n == 0:
+            return
+        for step in range(1, n + 1):
+            idx = (self._cur + step) % n
+            if not self._pages[idx]["boxes"]:
+                self._goto(idx)
+                return
+        self._status(self._tr("all_labelled"))
+
     # -- overlay callbacks --
-    def _on_box_added(self, x, y, w, h):
+    def _on_box_added(self, x, y, w, h, shape="rect", points=None):
         pg = self._page()
         if not pg:
             return
-        pg["boxes"].append({"x": int(round(x)), "y": int(round(y)),
-                            "w": int(round(w)), "h": int(round(h)),
-                            "kind": self._new_kind, "order": 0})
+        self._push_undo()
+        box = {"x": int(round(x)), "y": int(round(y)),
+               "w": int(round(w)), "h": int(round(h)),
+               "kind": self._new_kind, "order": 0, "shape": shape}
+        if points:
+            box["points"] = points
+        pg["boxes"].append(box)
         self._current = len(pg["boxes"]) - 1
         self._refresh()
 
     def _on_box_changed(self, idx, x, y, w, h):
         pg = self._page()
-        if pg and 0 <= idx < len(pg["boxes"]):
-            pg["boxes"][idx].update({"x": int(round(x)), "y": int(round(y)),
-                                     "w": int(round(w)), "h": int(round(h))})
-            self._current = idx
-            self._refresh()
+        if not (pg and 0 <= idx < len(pg["boxes"])):
+            return
+        self._push_undo()
+        b = pg["boxes"][idx]
+        nx, ny, nw, nh = (int(round(x)), int(round(y)),
+                          int(round(w)), int(round(h)))
+        pts = b.get("points")
+        if pts and b["w"] > 0 and b["h"] > 0:
+            # remap the lasso polygon from the old bbox to the new one
+            ox, oy, ow, oh = b["x"], b["y"], b["w"], b["h"]
+            sx, sy = nw / float(ow), nh / float(oh)
+            b["points"] = [[nx + (px - ox) * sx, ny + (py - oy) * sy]
+                           for px, py in pts]
+        b.update({"x": nx, "y": ny, "w": nw, "h": nh})
+        self._current = idx
+        self._refresh()
 
     def _on_box_removed(self, idx):
         pg = self._page()
         if pg and 0 <= idx < len(pg["boxes"]):
+            self._push_undo()
             del pg["boxes"][idx]
             self._current = min(getattr(self, "_current", -1), len(pg["boxes"]) - 1)
             self._refresh()
@@ -749,6 +1163,7 @@ class TrainerWindow(QMainWindow):
             return
         self._current = idx
         if self._order_mode:
+            self._push_undo()
             pg["boxes"][idx]["order"] = self._order_counter
             self._order_counter += 1
             self._refresh()
@@ -762,6 +1177,13 @@ class TrainerWindow(QMainWindow):
         if on and self.order_btn.isChecked():
             self.order_btn.setChecked(False)
         self.overlay.set_edit_mode(bool(on))
+
+    def _on_tool(self, key):
+        self.overlay.set_tool(key)
+        # picking a marking tool implies you want to draw
+        if not self.edit_btn.isChecked():
+            self.edit_btn.setChecked(True)
+        self._status(self._tr("tool_" + key + "_hint"))
 
     def _on_order_toggle(self, on):
         self._order_mode = bool(on)
@@ -778,7 +1200,8 @@ class TrainerWindow(QMainWindow):
 
     def on_clear_order(self):
         pg = self._page()
-        if pg:
+        if pg and any(b.get("order") for b in pg["boxes"]):
+            self._push_undo()
             for b in pg["boxes"]:
                 b["order"] = 0
         self._order_counter = 1
@@ -790,6 +1213,7 @@ class TrainerWindow(QMainWindow):
         if not pg or not pg["boxes"]:
             self._status(self._tr("no_boxes"), error=True)
             return
+        self._push_undo()
         auto_order(pg["boxes"], rtl=self.rtl_chk.isChecked())
         self._order_counter = len(pg["boxes"]) + 1
         self._refresh()
@@ -799,13 +1223,15 @@ class TrainerWindow(QMainWindow):
         pg = self._page()
         cur = getattr(self, "_current", -1)
         if pg and 0 <= cur < len(pg["boxes"]):
+            self._push_undo()
             del pg["boxes"][cur]
             self._current = min(cur, len(pg["boxes"]) - 1)
             self._refresh()
 
     def on_clear(self):
         pg = self._page()
-        if pg:
+        if pg and pg["boxes"]:
+            self._push_undo()
             pg["boxes"] = []
             self._current = -1
             self._refresh()
@@ -939,10 +1365,14 @@ class TrainerWindow(QMainWindow):
                     continue
                 boxes = []
                 for b in pd.get("boxes", []):
-                    boxes.append({"x": int(b["x"]), "y": int(b["y"]),
-                                  "w": int(b["w"]), "h": int(b["h"]),
-                                  "kind": "sfx" if b.get("kind") == "sfx" else "bubble",
-                                  "order": int(b.get("order", 0) or 0)})
+                    nb = {"x": int(b["x"]), "y": int(b["y"]),
+                          "w": int(b["w"]), "h": int(b["h"]),
+                          "kind": "sfx" if b.get("kind") == "sfx" else "bubble",
+                          "order": int(b.get("order", 0) or 0),
+                          "shape": b.get("shape", "rect")}
+                    if isinstance(b.get("points"), list):
+                        nb["points"] = b["points"]
+                    boxes.append(nb)
                 pages.append({"path": pd.get("path", ""),
                               "name": pd.get("name", "page"),
                               "img": img.convertToFormat(QImage.Format_RGB888),
@@ -952,6 +1382,7 @@ class TrainerWindow(QMainWindow):
             return
         self._pages = pages
         self._cur = -1
+        self._reset_history()
         if pages:
             self._goto(0)
         else:

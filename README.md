@@ -27,11 +27,34 @@ just want to label images.
    pages you can step through with ◀ / ▶.
    - **Zoom**: mouse wheel (zooms around the cursor). **Pan**: drag with the
      middle mouse button. **Fit** button resets to fit-the-window.
+   - **Rank the pages for labelling**: the **Sort pages** dropdown reorders the
+     loaded pages — *by name*, *unlabelled first*, *fewest boxes first*, or
+     *most boxes first* — so you always know what to do next. **Next unlabelled**
+     jumps to the next page that still has no boxes, and the counter shows how
+     many pages are already labelled (e.g. `12/20 labelled`).
 2. Turn on **Draw / edit boxes**:
    - drag on empty space = new box,
    - drag inside a box = move,
    - drag a corner = resize,
    - right-click a box = delete.
+
+   Pick a **marking tool** (choosing one also turns drawing on):
+   - **▭ Rectangle** — the classic corner-to-corner box.
+   - **◯ Ellipse** — drag an oval (nice for round bubbles); the saved box is its
+     bounding rectangle.
+   - **✎ Lasso** — draw a freehand outline; the box wraps tightly around it.
+   - **✨ Magic wand** — *click once* inside a bubble and it auto-detects the
+     same-colour region and boxes it. Raise **Wand tol.** to grab more, lower it
+     to grab less.
+
+   The **Centre marker** checkbox shows a cross + dot at the middle of every
+   marking (and a live one while you drag), so you can see exactly where the
+   centre lands. Every tool still exports as a normal YOLO bounding box, so the
+   dataset format never changes.
+
+   **Undo / Redo:** made a mistake? **↶ Undo** (**Ctrl+Z**) steps back through
+   adds, moves, resizes, deletes, relabels and ordering changes; **↷ Redo**
+   (**Ctrl+Y** or **Ctrl+Shift+Z**) reapplies them.
 3. Pick the class with **Bubble** (red) / **SFX** (blue). Click an existing box
    first, then a class button, to relabel it.
 4. *(optional)* **Set reading order** → click the bubbles in reading order
