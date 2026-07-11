@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess)
 
-VERSION = "2.1"
+VERSION = "2.2"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -405,6 +405,10 @@ class BoxOverlay(QWidget):
     boxChanged = pyqtSignal(int, float, float, float, float)
 
     _HANDLE = 9
+    # which box edges a handle moves ('l'eft 'r'ight 't'op 'b'ottom)
+    _HANDLE_EDGES = {"nw": ("l", "t"), "ne": ("r", "t"), "sw": ("l", "b"),
+                     "se": ("r", "b"), "n": ("t",), "s": ("b",),
+                     "e": ("r",), "w": ("l",)}
 
     def __init__(self):
         super(BoxOverlay, self).__init__()
@@ -543,8 +547,13 @@ class BoxOverlay(QWidget):
             if self._edit:
                 p.setBrush(QBrush(QColor(255, 255, 255)))
                 p.setPen(QPen(QColor(30, 30, 30), 1))
-                for hx, hy in ((r.left(), r.top()), (r.right(), r.top()),
-                               (r.left(), r.bottom()), (r.right(), r.bottom())):
+                hs = [(r.left(), r.top()), (r.right(), r.top()),
+                      (r.left(), r.bottom()), (r.right(), r.bottom())]
+                if k == self._current:            # edge handles on the active box
+                    cxp, cyp = r.center().x(), r.center().y()
+                    hs += [(cxp, r.top()), (cxp, r.bottom()),
+                           (r.left(), cyp), (r.right(), cyp)]
+                for hx, hy in hs:
                     p.drawRect(QRectF(hx - 3, hy - 3, 6, 6))
         # live preview of the shape being drawn
         rect = self._rect_of(self._drag) if self._drag else None
@@ -622,20 +631,35 @@ class BoxOverlay(QWidget):
         return (pos.x() - t.x()) / scale, (pos.y() - t.y()) / scale
 
     def _probe_box(self, k, pos, t, scale):
-        """What the point hits on box `k`: (k, corner) for a resize handle,
-        (k, 'move') inside the box, or None."""
+        """What the point hits on box `k`: (k, corner/edge) for a resize handle
+        (nw/ne/sw/se or n/s/e/w), (k, 'move') inside the box, or None."""
         b = self._boxes[k]
         x0 = t.x() + b["x"] * scale
         y0 = t.y() + b["y"] * scale
         x1 = x0 + b["w"] * scale
         y1 = y0 + b["h"] * scale
-        corners = {"nw": (x0, y0), "ne": (x1, y0),
-                   "sw": (x0, y1), "se": (x1, y1)}
-        for name, (cx, cy) in corners.items():
-            if abs(pos.x() - cx) <= self._HANDLE \
-                    and abs(pos.y() - cy) <= self._HANDLE:
-                return (k, name)
-        if x0 <= pos.x() <= x1 and y0 <= pos.y() <= y1:
+        H = self._HANDLE
+        px, py = pos.x(), pos.y()
+        nl, nr = abs(px - x0) <= H, abs(px - x1) <= H
+        nt, nb = abs(py - y0) <= H, abs(py - y1) <= H
+        in_x, in_y = x0 <= px <= x1, y0 <= py <= y1
+        if nl and nt:
+            return (k, "nw")
+        if nr and nt:
+            return (k, "ne")
+        if nl and nb:
+            return (k, "sw")
+        if nr and nb:
+            return (k, "se")
+        if nt and in_x:
+            return (k, "n")
+        if nb and in_x:
+            return (k, "s")
+        if nl and in_y:
+            return (k, "w")
+        if nr and in_y:
+            return (k, "e")
+        if in_x and in_y:
             return (k, "move")
         return None
 
@@ -683,7 +707,18 @@ class BoxOverlay(QWidget):
         if d["mode"] == "move":
             return (d["bx"] + (d["cx"] - d["px"]),
                     d["by"] + (d["cy"] - d["py"]), d["bw"], d["bh"])
-        return self._norm(d["fx"], d["fy"], d["cx"], d["cy"])
+        # resize: move only the grabbed edge(s) to the cursor, keep the rest
+        x0, y0, x1, y1 = d["x0"], d["y0"], d["x1"], d["y1"]
+        mv = d.get("mv", ())
+        if "l" in mv:
+            x0 = d["cx"]
+        if "r" in mv:
+            x1 = d["cx"]
+        if "t" in mv:
+            y0 = d["cy"]
+        if "b" in mv:
+            y1 = d["cy"]
+        return self._norm(x0, y0, x1, y1)
 
     def _clamp(self, x, y, w, h):
         x = max(0.0, min(x, self._doc_w - 1))
@@ -691,6 +726,14 @@ class BoxOverlay(QWidget):
         w = min(w, self._doc_w - x)
         h = min(h, self._doc_h - y)
         return x, y, w, h
+
+    @staticmethod
+    def _cursor_for(name):
+        return {"nw": Qt.SizeFDiagCursor, "se": Qt.SizeFDiagCursor,
+                "ne": Qt.SizeBDiagCursor, "sw": Qt.SizeBDiagCursor,
+                "n": Qt.SizeVerCursor, "s": Qt.SizeVerCursor,
+                "e": Qt.SizeHorCursor, "w": Qt.SizeHorCursor,
+                "move": Qt.SizeAllCursor}.get(name, Qt.CrossCursor)
 
     def mousePressEvent(self, event):
         self.setFocus()                      # take keyboard focus for nudging
@@ -732,15 +775,15 @@ class BoxOverlay(QWidget):
     def _begin_edit(self, pos):
         dx, dy = self._to_doc(pos)
         hit = self._handle_at(pos)
-        # resizing an existing box (grabbing a corner) always wins
+        # resizing an existing box (grabbing a corner or edge) always wins
         if hit is not None and hit[1] != "move":
-            idx, corner = hit
+            idx, name = hit
             b = self._boxes[idx]
-            fx = b["x"] + b["w"] if corner in ("nw", "sw") else b["x"]
-            fy = b["y"] + b["h"] if corner in ("nw", "ne") else b["y"]
-            self._drag = {"mode": "resize", "idx": idx, "fx": fx, "fy": fy,
-                          "cx": dx, "cy": dy, "obx": b["x"], "oby": b["y"],
-                          "obw": b["w"], "obh": b["h"]}
+            self._drag = {"mode": "resize", "idx": idx,
+                          "x0": b["x"], "y0": b["y"],
+                          "x1": b["x"] + b["w"], "y1": b["y"] + b["h"],
+                          "mv": self._HANDLE_EDGES.get(name, ()),
+                          "cx": dx, "cy": dy}
             self.update()
             return
         if self._tool == "wand":
@@ -773,7 +816,12 @@ class BoxOverlay(QWidget):
             self._panning = event.pos()
             self.update()
             return
-        if not self._edit or self._drag is None:
+        if not self._edit:
+            return
+        if self._drag is None:
+            # hover feedback: resize/move cursor over a handle, else crosshair
+            hit = self._handle_at(event.pos())
+            self.setCursor(self._cursor_for(hit[1]) if hit else Qt.CrossCursor)
             return
         dx, dy = self._to_doc(event.pos())
         self._drag["cx"], self._drag["cy"] = dx, dy

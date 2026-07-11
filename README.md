@@ -47,7 +47,7 @@ just want to label images.
 2. Turn on **Draw / edit boxes**:
    - drag on empty space = new box,
    - drag inside a box = move,
-   - drag a corner = resize,
+   - drag a **corner or edge** = resize (the cursor shows what you'll grab),
    - right-click a box = delete.
 
    When boxes overlap, the **currently selected box has priority** — click a box
