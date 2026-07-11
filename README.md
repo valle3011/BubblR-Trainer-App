@@ -95,6 +95,7 @@ buttons do, each item showing its shortcut.
 | **drag on empty space** (view mode) | rubber-band: select every box the rectangle covers |
 | **Ctrl+A** | select all boxes on the page |
 | **F** | fit the selected box tightly onto the bubble |
+| **Z** | zoom the view onto the selection |
 | **Esc** | deselect |
 | **[** / **]** | previous / next page |
 | **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) | undo / redo |

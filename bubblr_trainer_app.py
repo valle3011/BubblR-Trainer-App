@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.8"
+VERSION = "2.9"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -114,6 +114,7 @@ LANG = {
                     "Ctrl+click (or the Boxes list) — select several boxes; "
                     "delete/relabel act on all\n"
                     "F — fit the selected box tightly onto the bubble\n"
+                    "Z — zoom the view onto the selection\n"
                     "Esc — deselect\n"
                     "[  /  ]  — previous / next page\n"
                     "Ctrl+Z — undo     Ctrl+Y or Ctrl+Shift+Z — redo\n"
@@ -164,7 +165,7 @@ LANG = {
         "mi_next_todo": "Next unlabelled",
         "mi_close": "Close page", "mi_close_all": "Close all pages",
         "mi_zoom_in": "Zoom in", "mi_zoom_out": "Zoom out",
-        "mi_fit": "Fit to window",
+        "mi_zoom_sel": "Zoom to selection", "mi_fit": "Fit to window",
         "mi_shortcuts": "Keyboard shortcuts…", "mi_about": "About…",
         "about_text": "Make YOLO training pages for BubblR — no Krita or "
                       "Photoshop needed.",
@@ -273,6 +274,7 @@ LANG = {
                     "Strg+Klick (oder Boxen-Liste) — mehrere Boxen wählen; "
                     "Löschen/Umlabeln gilt für alle\n"
                     "F — ausgewählte Box eng an die Blase anpassen\n"
+                    "Z — Ansicht auf die Auswahl zoomen\n"
                     "Esc — Auswahl aufheben\n"
                     "[  /  ]  — vorige / nächste Seite\n"
                     "Strg+Z — rückgängig     Strg+Y oder Umschalt+Strg+Z — wiederh.\n"
@@ -323,7 +325,7 @@ LANG = {
         "mi_next_todo": "Nächste ungelabelte",
         "mi_close": "Seite schließen", "mi_close_all": "Alle Seiten schließen",
         "mi_zoom_in": "Vergrößern", "mi_zoom_out": "Verkleinern",
-        "mi_fit": "Einpassen",
+        "mi_zoom_sel": "Auf Auswahl zoomen", "mi_fit": "Einpassen",
         "mi_shortcuts": "Tastenkürzel…", "mi_about": "Über…",
         "about_text": "Erzeugt YOLO-Trainingsseiten für BubblR — ohne Krita "
                       "oder Photoshop.",
@@ -510,6 +512,22 @@ class BoxOverlay(QWidget):
         self._zoom = 1.0
         self._pan_x = 0.0
         self._pan_y = 0.0
+        self.update()
+
+    def zoom_to_rect(self, x, y, w, h, margin=0.18):
+        """Zoom + pan so the doc-rect (x, y, w, h) fills the view with a margin."""
+        if self._img is None or self._img.isNull():
+            return
+        vw, vh = self.width(), self.height()
+        base = self._base_scale()
+        if vw <= 0 or vh <= 0 or w <= 0 or h <= 0 or base <= 0:
+            return
+        fit = min(vw * (1 - margin) / w, vh * (1 - margin) / h)
+        self._zoom = max(0.1, min(12.0, fit / base))
+        s = base * self._zoom
+        rcx, rcy = x + w / 2.0, y + h / 2.0     # centre the rect in the view
+        self._pan_x = vw / 2.0 - rcx * s - (vw - self._doc_w * s) / 2.0
+        self._pan_y = vh / 2.0 - rcy * s - (vh - self._doc_h * s) / 2.0
         self.update()
 
     def _zoom_at(self, pos, factor):
@@ -1353,6 +1371,22 @@ class TrainerWindow(QMainWindow):
             self._current = len(pg["boxes"]) - 1
             self._refresh()
 
+    def on_zoom_selection(self):
+        """Zoom the view onto the selected box(es); no selection -> fit page."""
+        pg = self._page()
+        if not pg or not self._sel:
+            self.overlay.fit()
+            return
+        boxes = [pg["boxes"][i] for i in self._sel if 0 <= i < len(pg["boxes"])]
+        if not boxes:
+            self.overlay.fit()
+            return
+        x0 = min(b["x"] for b in boxes)
+        y0 = min(b["y"] for b in boxes)
+        x1 = max(b["x"] + b["w"] for b in boxes)
+        y1 = max(b["y"] + b["h"] for b in boxes)
+        self.overlay.zoom_to_rect(x0, y0, x1 - x0, y1 - y0)
+
     # -- right-click context menu on a box / box-list row --
     def _on_box_context(self, idx, gpos):
         pg = self._page()
@@ -1442,6 +1476,7 @@ class TrainerWindow(QMainWindow):
             ("m_view", [
                 ("mi_zoom_in", lambda: self.overlay.zoom_step(1.25), "Ctrl++"),
                 ("mi_zoom_out", lambda: self.overlay.zoom_step(1 / 1.25), "Ctrl+-"),
+                ("mi_zoom_sel", self.on_zoom_selection, "Z"),
                 ("mi_fit", lambda: self.overlay.fit(), None),
             ]),
             ("m_settings", [
