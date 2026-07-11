@@ -11,11 +11,13 @@ just want to label images.
   — no Python or PyQt5 install needed. It's a folder build (fastest start, no
   unpacking) — keep the `BubblR-Trainer` folder together and run the `.exe`
   inside it. Build it yourself with **`build_exe.bat`** (see Notes).
-  - **Desktop shortcut:** run **`make_shortcut.bat`** to drop a *BubblR Trainer*
-    shortcut (with the app icon) on your Desktop, so you don't have to open the
-    folder each time.
 - **Windows (with Python):** double-click **`run.bat`** — installs PyQt5 the
-  first time, then starts the app.
+  first time, then starts the app. On that first run it also **offers to create
+  a *BubblR Trainer* shortcut on your Desktop and in the Start menu**, so you
+  don't have to open the folder again.
+- **Shortcuts anytime:** run **`make_shortcut.bat`** to (re)create the Desktop +
+  Start-menu shortcuts (with the app icon). It points at the `.exe` if you built
+  one, otherwise at the Python app.
 - **Any OS / manually:**
   ```
   pip install PyQt5
@@ -102,10 +104,14 @@ Classes: **bubble = 0**, **sfx = 1**.
   PyInstaller if needed, then builds). Result: the folder
   `dist/BubblR-Trainer/` with **`BubblR-Trainer.exe`** inside — no Python or
   PyQt5 needed to run it.
-  - This is a *one-folder* (`--onedir`) build: it starts fast because nothing
-    unpacks at launch. Share the **whole folder** (~90 MB). Want a single
-    portable file instead? Edit `build_exe.bat` to use `--onefile` — then you
-    get one `dist/BubblR-Trainer.exe`, at the cost of a short unpack on every
-    start.
+  - This is a *one-folder* (`--onedir`) build. Share the **whole folder**
+    (~90 MB). Want a single portable file instead? Edit `build_exe.bat` to use
+    `--onefile` — then you get one `dist/BubblR-Trainer.exe`, at the cost of a
+    short unpack on every start.
   - The `build/`, `dist/` and `.spec` outputs are git-ignored (the build isn't
     committed — rebuild it locally).
+- **Slow to start?** On a PC with a huge font collection the first window can
+  take several seconds while Qt loads the system fonts (this affects every Qt
+  app, e.g. Krita — it's not the app itself). A splash appears instantly so it
+  doesn't look frozen. To actually cut the wait, see
+  **[FASTER-STARTUP.md](FASTER-STARTUP.md)**.
