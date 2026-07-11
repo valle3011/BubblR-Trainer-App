@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.2"
+VERSION = "4.3"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -194,7 +194,8 @@ LANG = {
         "save": "Save project…", "load_proj": "Load project…",
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
-        "settings_display": "Display", "settings_storage": "Storage location",
+        "settings_display": "Display", "settings_tools": "Tools",
+        "settings_storage": "Storage location",
         "settings_folder_title": "Dataset / export folder",
         "settings_folder_none": "(no folder chosen yet)",
         "settings_open": "Settings…",
@@ -378,7 +379,8 @@ LANG = {
         "save": "Projekt speichern…", "load_proj": "Projekt laden…",
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
-        "settings_display": "Anzeige", "settings_storage": "Speicherort",
+        "settings_display": "Anzeige", "settings_tools": "Werkzeuge",
+        "settings_storage": "Speicherort",
         "settings_folder_title": "Dataset-/Export-Ordner",
         "settings_folder_none": "(noch kein Ordner gewählt)",
         "settings_open": "Einstellungen…",
@@ -1373,6 +1375,7 @@ class TrainerWindow(QMainWindow):
         self._folder = cfg.get("folder", "")
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
+        self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
         self._new_kind = "bubble"
@@ -1487,13 +1490,9 @@ class TrainerWindow(QMainWindow):
             self._tg.addButton(btn)
             self.tool_btns[_key] = btn
         self.tool_btns["rect"].setChecked(True)
-        self.lbl_tol = QLabel(self._tr("wand_tol"))
-        self.tol_spin = QSpinBox()
-        self.tol_spin.setRange(1, 255)
-        self.tol_spin.setValue(40)
-        self.tol_spin.setFixedWidth(58)
-        self.tol_spin.setToolTip(self._tr("wand_tol_tip"))
-        self.tol_spin.valueChanged.connect(self.overlay.set_wand_tolerance)
+        # wand tolerance is now set in the Settings window (keeps the Tools dock
+        # small); apply the saved value to the overlay
+        self.overlay.set_wand_tolerance(self._wand_tol)
 
         self._build_docks()
 
@@ -1574,16 +1573,7 @@ class TrainerWindow(QMainWindow):
         lay.addWidget(self.lbl_relabel)
         self.lbl_counts = QLabel("")
         lay.addWidget(self.lbl_counts)
-
-        io_row = QHBoxLayout()
-        io_row.addStretch(1)
-        self.save_btn = QPushButton(self._tr("save"))
-        self.save_btn.clicked.connect(self.on_save_project)
-        io_row.addWidget(self.save_btn)
-        self.loadp_btn = QPushButton(self._tr("load_proj"))
-        self.loadp_btn.clicked.connect(self.on_load_project)
-        io_row.addWidget(self.loadp_btn)
-        lay.addLayout(io_row)
+        # Save / Load project live in the File menu (Ctrl+S / Ctrl+O)
 
         # the dataset/export folder is chosen (and shown) in the Settings window
         exp_row = QHBoxLayout()
@@ -1651,7 +1641,8 @@ class TrainerWindow(QMainWindow):
 
     def _save_settings(self):
         data = {"lang": self._lang, "folder": self._folder,
-                "ai_dir": self._ai_dir, "locked": self._locked}
+                "ai_dir": self._ai_dir, "locked": self._locked,
+                "wand_tol": self._wand_tol}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -1666,7 +1657,8 @@ class TrainerWindow(QMainWindow):
     # -- dockable panels (Tools / Boxes / Pages), Krita-style ----------------
     def _build_docks(self):
         """Wrap the tools, box list and thumbnail strip in movable dockers."""
-        # Tools docker: icon-only marking tools (reflow) + wand tolerance
+        # Tools docker: icon-only marking tools (reflow). Wand tolerance lives
+        # in the Settings window so this panel can shrink to just the icons.
         tools_w = QWidget()
         tv = QVBoxLayout(tools_w)
         tv.setContentsMargins(4, 4, 4, 4)
@@ -1675,13 +1667,6 @@ class TrainerWindow(QMainWindow):
         for k in ("rect", "ellipse", "lasso", "wand"):
             self._tools_flow.addWidget(self.tool_btns[k])
         tv.addWidget(flow_host)
-        tolw = QWidget()
-        th = QHBoxLayout(tolw)
-        th.setContentsMargins(0, 0, 0, 0)
-        th.addWidget(self.lbl_tol)
-        th.addWidget(self.tol_spin)
-        th.addStretch(1)
-        tv.addWidget(tolw)
         tv.addStretch(1)
         self.tools_dock = QDockWidget(self._tr("dock_tools"), self)
         self.tools_dock.setObjectName("toolsDock")
@@ -2000,6 +1985,35 @@ class TrainerWindow(QMainWindow):
         dv.addWidget(rb_de)
         dv.addStretch(1)
 
+        # -- Tools page: magic-wand tolerance --
+        toolsp = QWidget()
+        tvv = QVBoxLayout(toolsp)
+        wand_title = QLabel()
+        wand_title.setStyleSheet("font-weight: bold;")
+        tvv.addWidget(wand_title)
+        wand_row = QHBoxLayout()
+        wand_lbl = QLabel()
+        wand_spin = QSpinBox()
+        wand_spin.setRange(1, 255)
+        wand_spin.setValue(self._wand_tol)
+        wand_spin.setFixedWidth(70)
+
+        def on_wand(v):
+            self._wand_tol = int(v)
+            self.overlay.set_wand_tolerance(v)
+            self._save_settings()
+
+        wand_spin.valueChanged.connect(on_wand)
+        wand_row.addWidget(wand_lbl)
+        wand_row.addWidget(wand_spin)
+        wand_row.addStretch(1)
+        tvv.addLayout(wand_row)
+        wand_hint = QLabel()
+        wand_hint.setWordWrap(True)
+        wand_hint.setStyleSheet("color: gray;")
+        tvv.addWidget(wand_hint)
+        tvv.addStretch(1)
+
         # -- Storage page: dataset/export folder --
         store = QWidget()
         sv = QVBoxLayout(store)
@@ -2021,6 +2035,7 @@ class TrainerWindow(QMainWindow):
         sv.addStretch(1)
 
         stack.addWidget(disp)
+        stack.addWidget(toolsp)
         stack.addWidget(store)
         nav.currentRowChanged.connect(stack.setCurrentIndex)
 
@@ -2031,10 +2046,14 @@ class TrainerWindow(QMainWindow):
             nav.blockSignals(True)
             nav.clear()
             nav.addItem(tr("settings_display"))
+            nav.addItem(tr("settings_tools"))
             nav.addItem(tr("settings_storage"))
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
             lang_title.setText(tr("mi_language"))
+            wand_title.setText(tr("settings_tools"))
+            wand_lbl.setText(tr("wand_tol"))
+            wand_hint.setText(tr("wand_tol_tip"))
             store_title.setText(tr("settings_folder_title"))
             choose_btn.setText(tr("mi_folder"))
             path_lbl.setText(self._folder or tr("settings_folder_none"))
@@ -2314,8 +2333,6 @@ class TrainerWindow(QMainWindow):
         self.next_todo_btn.setText(t("next_todo"))
         for _k, _btn in self.tool_btns.items():
             _btn.setToolTip(t("tool_" + _k + "_hint"))
-        self.lbl_tol.setText(t("wand_tol"))
-        self.tol_spin.setToolTip(t("wand_tol_tip"))
         self.center_chk.setText(t("center_marker"))
         self.center_chk.setToolTip(t("center_marker_tip"))
         self.path_chk.setText(t("order_path"))
@@ -2345,8 +2362,6 @@ class TrainerWindow(QMainWindow):
         self.bubble_btn.setText(t("bubble"))
         self.sfx_btn.setText(t("sfx"))
         self.lbl_relabel.setText(t("relabel"))
-        self.save_btn.setText(t("save"))
-        self.loadp_btn.setText(t("load_proj"))
         self.exp_page_btn.setText(t("export_page"))
         self.exp_all_btn.setText(t("export_all"))
         self._refresh()

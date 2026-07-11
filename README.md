@@ -63,8 +63,8 @@ just want to label images.
      bounding rectangle.
    - **✎ Lasso** — draw a freehand outline; the box wraps tightly around it.
    - **✨ Magic wand** — *click once* inside a bubble and it auto-detects the
-     same-colour region and boxes it. Raise **Wand tol.** to grab more, lower it
-     to grab less.
+     same-colour region and boxes it. Set the **wand tolerance** under
+     *Settings → Tools* (higher = grabs more, lower = grabs less).
 
    The **Centre marker** checkbox shows a cross + dot at the middle of every
    marking (and a live one while you drag), so you can see exactly where the
