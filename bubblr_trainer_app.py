@@ -26,7 +26,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.6"
+VERSION = "3.7"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -129,7 +129,8 @@ LANG = {
         "boxes": "Boxes",
         "boxes_tip": "All boxes on this page — click to select, "
                      "drag to reorder (sets the reading order).",
-        "strip_tip": "Page thumbnails — click to jump. ✓ = already has boxes.",
+        "strip_tip": "Page thumbnails — click to jump. ✓ = exported to the "
+                     "dataset, • = has boxes but not exported yet.",
         "prog": "{done} / {total} pages labelled",
         "fit_box": "Fit box to bubble",
         "fit_done": "Box fitted to the bubble.",
@@ -295,7 +296,8 @@ LANG = {
         "boxes": "Boxen",
         "boxes_tip": "Alle Boxen dieser Seite — anklicken zum Auswählen, "
                      "ziehen zum Umsortieren (setzt die Lesereihenfolge).",
-        "strip_tip": "Seiten-Miniaturen — anklicken zum Springen. ✓ = hat Boxen.",
+        "strip_tip": "Seiten-Miniaturen — anklicken zum Springen. ✓ = ins "
+                     "Dataset exportiert, • = hat Boxen, aber noch nicht exportiert.",
         "prog": "{done} / {total} Seiten gelabelt",
         "fit_box": "Box an Blase anpassen",
         "fit_done": "Box an die Blase angepasst.",
@@ -1790,7 +1792,10 @@ class TrainerWindow(QMainWindow):
 
     @staticmethod
     def _page_strip_label(i, pg):
-        return ("%d ✓" % (i + 1)) if pg["boxes"] else str(i + 1)
+        if not pg["boxes"]:
+            return str(i + 1)
+        # ✓ = exported into the dataset, • = labelled but not yet exported
+        return "%d ✓" % (i + 1) if pg.get("exported") else "%d •" % (i + 1)
 
     def _rebuild_page_strip(self):
         lw = self.page_strip
@@ -2064,6 +2069,7 @@ class TrainerWindow(QMainWindow):
         pg = self._page()
         if pg is None:
             return
+        pg["exported"] = False       # any edit makes the exported copy stale
         self._undo.append((self._cur, copy.deepcopy(pg["boxes"]),
                            getattr(self, "_current", -1)))
         if len(self._undo) > 120:
@@ -2566,6 +2572,7 @@ class TrainerWindow(QMainWindow):
             self._render_preview(pg).save(os.path.join(preview, stem + ".png"), "PNG")
         except Exception:
             pass
+        pg["exported"] = True         # mark it saved so the strip shows a ✓
         return stem
 
     def on_export(self, all_pages):
@@ -2594,6 +2601,8 @@ class TrainerWindow(QMainWindow):
         except Exception as exc:
             self._status(self._tr("export_fail").format(msg=exc), error=True)
             return
+        if hasattr(self, "page_strip"):
+            self._rebuild_page_strip()     # show the fresh ✓ export markers
         if all_pages:
             self._status(self._tr("exported_all").format(n=len(pages)))
         else:
