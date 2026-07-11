@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess)
 
-VERSION = "2.0"
+VERSION = "2.1"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -896,10 +896,7 @@ class TrainerWindow(QMainWindow):
         root.setLayout(lay)
 
         head = QHBoxLayout()
-        self.lbl_intro = QLabel(self._tr("intro"))
-        self.lbl_intro.setWordWrap(True)
-        self.lbl_intro.setStyleSheet("color: gray;")
-        head.addWidget(self.lbl_intro, 1)
+        head.addStretch(1)
         self.lang_combo = QComboBox()
         self.lang_combo.addItem("English", "en")
         self.lang_combo.addItem("Deutsch", "de")
@@ -909,13 +906,6 @@ class TrainerWindow(QMainWindow):
         lay.addLayout(head)
 
         top = QHBoxLayout()
-        self.load_btn = QPushButton(self._tr("load"))
-        self.load_btn.clicked.connect(self.on_load_images)
-        top.addWidget(self.load_btn)
-        self.rank_load_btn = QPushButton(self._tr("rank_load"))
-        self.rank_load_btn.setToolTip(self._tr("rank_load_tip"))
-        self.rank_load_btn.clicked.connect(self.on_rank_load)
-        top.addWidget(self.rank_load_btn)
         self.lbl_sort = QLabel(self._tr("sort_by"))
         top.addWidget(self.lbl_sort)
         self.sort_combo = QComboBox()
@@ -1095,6 +1085,11 @@ class TrainerWindow(QMainWindow):
         lay.addWidget(self.lbl_counts)
 
         io_row = QHBoxLayout()
+        self.rank_load_btn = QPushButton(self._tr("rank_load"))
+        self.rank_load_btn.setToolTip(self._tr("rank_load_tip"))
+        self.rank_load_btn.clicked.connect(self.on_rank_load)
+        io_row.addWidget(self.rank_load_btn)
+        io_row.addStretch(1)
         self.save_btn = QPushButton(self._tr("save"))
         self.save_btn.clicked.connect(self.on_save_project)
         io_row.addWidget(self.save_btn)
@@ -1121,6 +1116,10 @@ class TrainerWindow(QMainWindow):
         exp_row.addWidget(self.exp_all_btn)
         lay.addLayout(exp_row)
 
+        self.lbl_intro = QLabel(self._tr("intro"))
+        self.lbl_intro.setWordWrap(True)
+        self.lbl_intro.setStyleSheet("color: gray; font-size: 11px;")
+        lay.addWidget(self.lbl_intro)
         self.status = QLabel(self._tr("ready"))
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
@@ -1469,7 +1468,6 @@ class TrainerWindow(QMainWindow):
         self.lbl_boxes.setText(t("boxes"))
         self.box_list.setToolTip(t("boxes_tip"))
         self.page_strip.setToolTip(t("strip_tip"))
-        self.load_btn.setText(t("load"))
         self.rank_load_btn.setText(t("rank_load"))
         self.rank_load_btn.setToolTip(t("rank_load_tip"))
         self.lbl_sort.setText(t("sort_by"))
@@ -2162,6 +2160,7 @@ def apply_krita_dark(app):
         p.setColor(QPalette.Disabled, role, disabled)
     app.setPalette(p)
     app.setStyleSheet(
+        "QMainWindow{background:#2b2e33;}"
         "QToolTip{color:#eff0f1;background:#31363b;border:1px solid #4d4d4d;}"
         "QPushButton{padding:5px 9px;border:1px solid #4d4d4d;border-radius:3px;"
         "background:#3a4045;}"
@@ -2171,7 +2170,17 @@ def apply_krita_dark(app):
         "QPushButton:disabled{color:#7f8c8d;background:#33383c;}"
         "QComboBox{padding:3px 6px;border:1px solid #4d4d4d;border-radius:3px;"
         "background:#232629;}"
-        "QLabel{color:#eff0f1;}")
+        "QLabel{color:#eff0f1;}"
+        # menu bar + drop-down menus (were light on Windows)
+        "QMenuBar{background:#31363b;color:#eff0f1;}"
+        "QMenuBar::item{background:transparent;padding:4px 10px;}"
+        "QMenuBar::item:selected{background:#3daee9;color:#ffffff;}"
+        "QMenu{background:#232629;color:#eff0f1;border:1px solid #4d4d4d;}"
+        "QMenu::item:selected{background:#3daee9;color:#ffffff;}"
+        "QMenu::separator{height:1px;background:#4d4d4d;margin:4px 6px;}"
+        # list widgets (Boxes list + page thumbnail strip)
+        "QListWidget{background:#232629;color:#eff0f1;border:1px solid #4d4d4d;}"
+        "QListWidget::item:selected{background:#2f6f9f;color:#ffffff;}")
 
 
 def _resource(*parts):
