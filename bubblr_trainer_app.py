@@ -19,12 +19,13 @@ from PyQt5.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-    QAbstractItemView)
+    QAbstractItemView, QInputDialog)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer, QSize
+from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
+                          QSize, QProcess)
 
-VERSION = "1.8"
+VERSION = "1.9"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -120,6 +121,22 @@ LANG = {
         "boxes_tip": "All boxes on this page — click to select, "
                      "drag to reorder (sets the reading order).",
         "strip_tip": "Page thumbnails — click to jump. ✓ = already has boxes.",
+        "rank_load": "🎯 Rank & load…",
+        "rank_load_tip": "Rank a folder of pages with the BubblR AI tool (if "
+                         "installed), then load the top pages to label first.",
+        "rank_pick": "Choose a folder of pages to rank",
+        "rank_no_ai_title": "BubblR AI not found",
+        "rank_no_ai": "This needs the BubblR AI tool (its 'propose.py'). "
+                      "Locate the AI folder now?",
+        "rank_pick_ai": "Select the BubblR AI folder (contains propose.py)",
+        "rank_no_venv": "The AI folder has no .venv — set it up first "
+                        "(setup.ps1 -Training in the AI tool).",
+        "rank_top_title": "Rank pages",
+        "rank_top_q": "How many top pages to load?",
+        "rank_running": "Ranking… (loads the model first, can take a while)",
+        "rank_fail": "Ranking failed — see the AI tool for details.",
+        "rank_empty": "No ranked pages were produced.",
+        "rank_loaded": "Loaded the top {n} ranked page(s).",
         "copied": "Box copied.",
         "pasted": "Box pasted.",
         "duplicated": "Box duplicated.",
@@ -232,6 +249,22 @@ LANG = {
         "boxes_tip": "Alle Boxen dieser Seite — anklicken zum Auswählen, "
                      "ziehen zum Umsortieren (setzt die Lesereihenfolge).",
         "strip_tip": "Seiten-Miniaturen — anklicken zum Springen. ✓ = hat Boxen.",
+        "rank_load": "🎯 Ranken & laden…",
+        "rank_load_tip": "Einen Ordner mit Seiten über das BubblR-AI-Tool ranken "
+                         "(falls installiert) und die Top-Seiten zum Labeln laden.",
+        "rank_pick": "Ordner mit Seiten zum Ranken wählen",
+        "rank_no_ai_title": "BubblR AI nicht gefunden",
+        "rank_no_ai": "Dafür wird das BubblR-AI-Tool gebraucht (dessen "
+                      "'propose.py'). Den AI-Ordner jetzt auswählen?",
+        "rank_pick_ai": "BubblR-AI-Ordner wählen (enthält propose.py)",
+        "rank_no_venv": "Im AI-Ordner fehlt die .venv — erst einrichten "
+                        "(setup.ps1 -Training im AI-Tool).",
+        "rank_top_title": "Seiten ranken",
+        "rank_top_q": "Wie viele Top-Seiten laden?",
+        "rank_running": "Ranking läuft… (lädt zuerst das Modell, dauert etwas)",
+        "rank_fail": "Ranking fehlgeschlagen — Details im AI-Tool.",
+        "rank_empty": "Es wurden keine gerankten Seiten erzeugt.",
+        "rank_loaded": "Top {n} gerankte Seite(n) geladen.",
         "copied": "Box kopiert.",
         "pasted": "Box eingefügt.",
         "duplicated": "Box dupliziert.",
@@ -806,6 +839,7 @@ class TrainerWindow(QMainWindow):
         cfg = self._load_settings()
         self._lang = cfg.get("lang", "en")
         self._folder = cfg.get("folder", "")
+        self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
         self._new_kind = "bubble"
@@ -838,6 +872,10 @@ class TrainerWindow(QMainWindow):
         self.load_btn = QPushButton(self._tr("load"))
         self.load_btn.clicked.connect(self.on_load_images)
         top.addWidget(self.load_btn)
+        self.rank_load_btn = QPushButton(self._tr("rank_load"))
+        self.rank_load_btn.setToolTip(self._tr("rank_load_tip"))
+        self.rank_load_btn.clicked.connect(self.on_rank_load)
+        top.addWidget(self.rank_load_btn)
         self.lbl_sort = QLabel(self._tr("sort_by"))
         top.addWidget(self.lbl_sort)
         self.sort_combo = QComboBox()
@@ -1104,7 +1142,8 @@ class TrainerWindow(QMainWindow):
             return {}
 
     def _save_settings(self):
-        data = {"lang": self._lang, "folder": self._folder}
+        data = {"lang": self._lang, "folder": self._folder,
+                "ai_dir": self._ai_dir}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
         except Exception:                    # noqa: BLE001
@@ -1329,6 +1368,8 @@ class TrainerWindow(QMainWindow):
         self.box_list.setToolTip(t("boxes_tip"))
         self.page_strip.setToolTip(t("strip_tip"))
         self.load_btn.setText(t("load"))
+        self.rank_load_btn.setText(t("rank_load"))
+        self.rank_load_btn.setToolTip(t("rank_load_tip"))
         self.lbl_sort.setText(t("sort_by"))
         for i, _k in enumerate(("name", "unlabeled", "fewest", "most")):
             self.sort_combo.setItemText(i, t("sort_" + _k))
@@ -1733,6 +1774,89 @@ class TrainerWindow(QMainWindow):
         self._folder = path
         self._save_settings()
         self._refresh_folder_label()
+
+    # -- optional bridge to the BubblR AI ranking tool -----------------------
+    def _find_ai_dir(self):
+        """The BubblR AI tool folder (has propose.py): the saved setting, else
+        the usual sibling location next to this app. '' if not found."""
+        cands = []
+        if self._ai_dir:
+            cands.append(self._ai_dir)
+        base = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
+                else os.path.dirname(os.path.abspath(__file__)))
+        cands.append(os.path.normpath(
+            os.path.join(base, "..", "BubblR-Test", "ai")))
+        for d in cands:
+            if d and os.path.isfile(os.path.join(d, "propose.py")):
+                return d
+        return ""
+
+    @staticmethod
+    def _ai_python(ai_dir):
+        p = os.path.join(ai_dir, ".venv", "Scripts", "python.exe")
+        return p if os.path.exists(p) else ""
+
+    def on_rank_load(self):
+        """Rank a folder of raw pages with the AI tool, then load the top ones."""
+        folder = QFileDialog.getExistingDirectory(
+            self, self._tr("rank_pick"), self._folder or os.path.expanduser("~"))
+        if not folder:
+            return
+        ai = self._find_ai_dir()
+        if not ai:
+            if QMessageBox.question(
+                    self, self._tr("rank_no_ai_title"), self._tr("rank_no_ai"),
+                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                return
+            d = QFileDialog.getExistingDirectory(
+                self, self._tr("rank_pick_ai"), os.path.expanduser("~"))
+            if not d or not os.path.isfile(os.path.join(d, "propose.py")):
+                self._status(self._tr("rank_no_ai"), error=True)
+                return
+            ai = self._ai_dir = d
+            self._save_settings()
+        py = self._ai_python(ai)
+        if not py:
+            self._status(self._tr("rank_no_venv"), error=True)
+            return
+        top, ok = QInputDialog.getInt(
+            self, self._tr("rank_top_title"), self._tr("rank_top_q"), 30, 1, 500)
+        if not ok:
+            return
+        self._rank_folder = folder
+        self.rank_load_btn.setEnabled(False)
+        self._status(self._tr("rank_running"))
+        self._rank_proc = QProcess(self)
+        self._rank_proc.setWorkingDirectory(ai)
+        self._rank_proc.setProcessChannelMode(QProcess.MergedChannels)
+        self._rank_proc.readyReadStandardOutput.connect(self._rank_output)
+        self._rank_proc.finished.connect(self._rank_finished)
+        self._rank_proc.start(py, ["-u", os.path.join(ai, "propose.py"),
+                                   "--dir", folder, "--top", str(top)])
+
+    def _rank_output(self):
+        txt = bytes(self._rank_proc.readAllStandardOutput()).decode(
+            "utf-8", "replace").strip().splitlines()
+        if txt:
+            self._status(self._tr("rank_running") + "  " + txt[-1][:80])
+
+    def _rank_finished(self, code, _status):
+        self.rank_load_btn.setEnabled(True)
+        if code != 0:
+            self._status(self._tr("rank_fail"), error=True)
+            return
+        out = os.path.join(self._rank_folder, "_label_first")
+        try:
+            files = sorted(f for f in os.listdir(out)
+                           if f.lower().endswith(
+                               (".png", ".jpg", ".jpeg", ".webp", ".bmp")))
+        except OSError:
+            files = []
+        if not files:
+            self._status(self._tr("rank_empty"), error=True)
+            return
+        n = self.add_image_paths([os.path.join(out, f) for f in files])
+        self._status(self._tr("rank_loaded").format(n=n))
 
     def _render_preview(self, pg):
         img = pg["img"].convertToFormat(QImage.Format_ARGB32)

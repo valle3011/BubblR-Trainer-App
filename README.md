@@ -122,6 +122,13 @@ Classes: **bubble = 0**, **sfx = 1**.
 
 ## Notes
 
+- **🎯 Rank & load… (optional):** if the BubblR AI tool is present, this button
+  ranks a folder of raw pages by how much they'd teach the model (active
+  learning) and loads the top ones straight in — so you label the most useful
+  pages first. The trainer stays AI-free otherwise: without the AI tool the
+  button just points you to it (it looks for the AI folder next to the app, or
+  you pick it once). The ranking runs in the background; the model load makes
+  the first run take a moment.
 - Settings (language, dataset folder) are stored in `~/.bubblr_trainer.json`.
 - Bilingual (English / Deutsch) — switch with the dropdown at the top-right.
 - **Make a no-Python `.exe`:** double-click **`build_exe.bat`** (installs
