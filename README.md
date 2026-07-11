@@ -86,6 +86,12 @@ just want to label images.
 5. Choose a **dataset folder** (once — can be a shared Drive folder).
 6. **Export this page** or **Export all pages**.
 
+The main actions (undo/redo, draw, set/auto order, delete, class, export) sit in
+a **movable Actions toolbar** so the canvas gets the vertical space. Above it a
+small row has a **Show** filter (All / Bubbles only / SFX only — hides the other
+class on the canvas and dims it in the Boxes list) and an **Auto order** toggle
+that re-numbers the reading order automatically after every add/move/delete.
+
 There's a **menu bar** (File / Edit / Page / View / Settings / Help) with
 everything the
 buttons do, each item showing its shortcut.

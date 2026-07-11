@@ -22,13 +22,13 @@ from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
     QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
-    QStyle, QWidgetItem, QTabWidget)
+    QStyle, QWidgetItem, QTabWidget, QToolBar)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.4"
+VERSION = "4.5"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -65,6 +65,11 @@ LANG = {
         "sort_name": "by name",
         "sort_unlabeled": "unlabelled first",
         "sort_unexported": "unexported first",
+        "show": "Show:", "show_all": "All", "show_bubble": "Bubbles only",
+        "show_sfx": "SFX only",
+        "auto_order_live": "Auto order",
+        "auto_order_live_tip": "Re-number the reading order automatically after "
+                               "every add / move / delete.",
         "sort_fewest": "fewest boxes first",
         "sort_most": "most boxes first",
         "next_todo": "Next unlabelled",
@@ -207,6 +212,7 @@ LANG = {
         "settings_unlock_hint": "When on, drag a panel by its title bar to move, "
                                 "dock or float it. Turn off to lock the layout.",
         "dock_tools": "Tools", "dock_boxes": "Boxes", "dock_pages": "Pages",
+        "bar_actions": "Actions",
         "mi_lock_panels": "Lock panels",
         "export_page": "Export this page", "export_all": "Export all pages",
         "ready": "Load page images to begin.",
@@ -251,6 +257,11 @@ LANG = {
         "sort_name": "nach Name",
         "sort_unlabeled": "ungelabelte zuerst",
         "sort_unexported": "nicht exportierte zuerst",
+        "show": "Zeigen:", "show_all": "Alle", "show_bubble": "Nur Bubbles",
+        "show_sfx": "Nur SFX",
+        "auto_order_live": "Auto-Reihenfolge",
+        "auto_order_live_tip": "Die Lesereihenfolge nach jedem Hinzufügen / "
+                               "Verschieben / Löschen automatisch neu vergeben.",
         "sort_fewest": "wenigste Boxen zuerst",
         "sort_most": "meiste Boxen zuerst",
         "next_todo": "Nächste ungelabelte",
@@ -396,6 +407,7 @@ LANG = {
                                 "ziehen zum Verschieben, Andocken oder Lösen. "
                                 "Ausschalten sperrt das Layout.",
         "dock_tools": "Werkzeuge", "dock_boxes": "Boxen", "dock_pages": "Seiten",
+        "bar_actions": "Aktionen",
         "mi_lock_panels": "Panels sperren",
         "export_page": "Diese Seite exportieren", "export_all": "Alle Seiten exportieren",
         "ready": "Zum Start Seitenbilder laden.",
@@ -601,6 +613,7 @@ class BoxOverlay(QWidget):
         self._tool = "rect"       # rect | ellipse | lasso | wand
         self._show_center = True  # draw a marker at each box's centre
         self._show_order_path = False  # draw the 1->2->3 reading-order path
+        self._kind_filter = None       # None | "bubble" | "sfx" (show only that)
         self._wand_tol = 40       # magic-wand colour tolerance (0..255)
         self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -626,6 +639,18 @@ class BoxOverlay(QWidget):
     def set_order_path(self, on):
         self._show_order_path = bool(on)
         self.update()
+
+    def set_kind_filter(self, kind):
+        """Show only boxes of this kind ("bubble"/"sfx"); None shows all."""
+        self._kind_filter = kind if kind in ("bubble", "sfx") else None
+        self.update()
+
+    def _hidden(self, b):
+        """Is this box hidden by the active class filter?"""
+        f = self._kind_filter
+        if f is None:
+            return False
+        return b.get("kind", "bubble") != f
 
     def set_wand_tolerance(self, value):
         self._wand_tol = max(1, min(255, int(value)))
@@ -725,6 +750,8 @@ class BoxOverlay(QWidget):
         fnt.setPixelSize(13)
         p.setFont(fnt)
         for k, b in enumerate(self._boxes):
+            if self._hidden(b):                 # class filter hides this box
+                continue
             r = QRectF(t.x() + b["x"] * scale, t.y() + b["y"] * scale,
                        b["w"] * scale, b["h"] * scale)
             color = QColor(*KIND_COLOR.get(b.get("kind", "bubble"),
@@ -858,6 +885,8 @@ class BoxOverlay(QWidget):
         y = (pos.y() - t.y()) / scale
         best, best_area = -1, None
         for k, b in enumerate(self._boxes):
+            if self._hidden(b):                 # can't pick a filtered-out box
+                continue
             if b["x"] <= x <= b["x"] + b["w"] and \
                b["y"] <= y <= b["y"] + b["h"]:
                 area = b["w"] * b["h"]
@@ -913,13 +942,15 @@ class BoxOverlay(QWidget):
         # The currently selected box has priority: when boxes overlap, editing
         # stays on the box you picked instead of grabbing whatever is on top.
         cur = getattr(self, "_current", -1)
-        if 0 <= cur < len(self._boxes):
+        if 0 <= cur < len(self._boxes) and not self._hidden(self._boxes[cur]):
             hit = self._probe_box(cur, pos, t, scale)
             if hit is not None:
                 return hit
         # otherwise: any corner wins (resize), else the smallest box (move)
         best, best_area = None, None
         for k in range(len(self._boxes)):
+            if self._hidden(self._boxes[k]):
+                continue
             hit = self._probe_box(k, pos, t, scale)
             if hit is None:
                 continue
@@ -1382,6 +1413,8 @@ class TrainerWindow(QMainWindow):
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
+        self._auto_order = bool(cfg.get("auto_order_on", False))
+        self._class_filter = None                 # None | "bubble" | "sfx"
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
         self._new_kind = "bubble"
@@ -1502,8 +1535,16 @@ class TrainerWindow(QMainWindow):
 
         self._build_docks()
 
-        # view-option checkboxes (centre marker, order path)
+        # view-option row: class filter, centre marker, order path, auto order
         opt_row = QHBoxLayout()
+        self.lbl_filter = QLabel(self._tr("show"))
+        opt_row.addWidget(self.lbl_filter)
+        self.filter_combo = QComboBox()
+        for _fk in ("all", "bubble", "sfx"):
+            self.filter_combo.addItem(self._tr("show_" + _fk), _fk)
+        self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
+        opt_row.addWidget(self.filter_combo)
+        opt_row.addSpacing(12)
         self.center_chk = QCheckBox(self._tr("center_marker"))
         self.center_chk.setChecked(True)
         self.center_chk.setToolTip(self._tr("center_marker_tip"))
@@ -1514,48 +1555,59 @@ class TrainerWindow(QMainWindow):
         self.path_chk.setToolTip(self._tr("order_path_tip"))
         self.path_chk.toggled.connect(self.overlay.set_order_path)
         opt_row.addWidget(self.path_chk)
+        self.auto_chk = QCheckBox(self._tr("auto_order_live"))
+        self.auto_chk.setToolTip(self._tr("auto_order_live_tip"))
+        self.auto_chk.setChecked(self._auto_order)     # set before connecting
+        self.auto_chk.toggled.connect(self.set_auto_order)
+        opt_row.addWidget(self.auto_chk)
         opt_row.addStretch(1)
         lay.addLayout(opt_row)
 
-        tools = QHBoxLayout()
+        # Actions live in a movable toolbar (frees vertical space for the canvas)
+        bar = QToolBar(self._tr("bar_actions"))
+        bar.setObjectName("actionBar")
+        bar.setMovable(True)
+        bar.setFloatable(True)
+        self.action_bar = bar
+        self.addToolBar(Qt.BottomToolBarArea, bar)
         self.undo_btn = QPushButton(self._tr("undo"))
         self.undo_btn.setToolTip(self._tr("undo_tip"))
         self.undo_btn.clicked.connect(self.undo)
-        tools.addWidget(self.undo_btn)
+        bar.addWidget(self.undo_btn)
         self.redo_btn = QPushButton(self._tr("redo"))
         self.redo_btn.setToolTip(self._tr("redo_tip"))
         self.redo_btn.clicked.connect(self.redo)
-        tools.addWidget(self.redo_btn)
+        bar.addWidget(self.redo_btn)
+        bar.addSeparator()
         self.edit_btn = QPushButton(self._tr("edit"))
         self.edit_btn.setCheckable(True)
         self.edit_btn.toggled.connect(self._on_edit_toggle)
-        tools.addWidget(self.edit_btn)
+        bar.addWidget(self.edit_btn)
         self.order_btn = QPushButton(self._tr("set_order"))
         self.order_btn.setCheckable(True)
         self.order_btn.toggled.connect(self._on_order_toggle)
-        tools.addWidget(self.order_btn)
+        bar.addWidget(self.order_btn)
         self.auto_order_btn = QPushButton(self._tr("auto_order"))
         self.auto_order_btn.setToolTip(self._tr("auto_order_tip"))
         self.auto_order_btn.clicked.connect(self.on_auto_order)
-        tools.addWidget(self.auto_order_btn)
+        bar.addWidget(self.auto_order_btn)
         self.rtl_chk = QCheckBox(self._tr("rtl"))
         self.rtl_chk.setChecked(True)
         self.rtl_chk.setToolTip(self._tr("rtl_tip"))
-        tools.addWidget(self.rtl_chk)
+        bar.addWidget(self.rtl_chk)
+        bar.addSeparator()
         self.del_btn = QPushButton(self._tr("delete"))
         self.del_btn.clicked.connect(self.on_delete)
-        tools.addWidget(self.del_btn)
+        bar.addWidget(self.del_btn)
         self.clear_order_btn = QPushButton(self._tr("clear_order"))
         self.clear_order_btn.clicked.connect(self.on_clear_order)
-        tools.addWidget(self.clear_order_btn)
+        bar.addWidget(self.clear_order_btn)
         self.clear_btn = QPushButton(self._tr("clear"))
         self.clear_btn.clicked.connect(self.on_clear)
-        tools.addWidget(self.clear_btn)
-        lay.addLayout(tools)
-
-        kind_row = QHBoxLayout()
-        self.lbl_kind = QLabel(self._tr("kind"))
-        kind_row.addWidget(self.lbl_kind)
+        bar.addWidget(self.clear_btn)
+        bar.addSeparator()
+        self.lbl_kind = QLabel(self._tr("kind") + " ")
+        bar.addWidget(self.lbl_kind)
         self._kg = QButtonGroup(self)
         self._kg.setExclusive(True)
         self.bubble_btn = QPushButton(self._tr("bubble"))
@@ -1569,27 +1621,23 @@ class TrainerWindow(QMainWindow):
         self._kg.addButton(self.sfx_btn)
         self.bubble_btn.setStyleSheet("QPushButton:checked{background:#e63c3c;color:white;}")
         self.sfx_btn.setStyleSheet("QPushButton:checked{background:#4682e6;color:white;}")
-        kind_row.addWidget(self.bubble_btn)
-        kind_row.addWidget(self.sfx_btn)
-        kind_row.addStretch(1)
-        lay.addLayout(kind_row)
+        bar.addWidget(self.bubble_btn)
+        bar.addWidget(self.sfx_btn)
+        bar.addSeparator()
+        self.exp_page_btn = QPushButton(self._tr("export_page"))
+        self.exp_page_btn.clicked.connect(lambda: self.on_export(False))
+        bar.addWidget(self.exp_page_btn)
+        self.exp_all_btn = QPushButton(self._tr("export_all"))
+        self.exp_all_btn.clicked.connect(lambda: self.on_export(True))
+        bar.addWidget(self.exp_all_btn)
 
         self.lbl_relabel = QLabel(self._tr("relabel"))
         self.lbl_relabel.setStyleSheet("color: gray;")
         lay.addWidget(self.lbl_relabel)
         self.lbl_counts = QLabel("")
         lay.addWidget(self.lbl_counts)
+        # Actions (edit/order/delete/class/export) live in the toolbar above;
         # Save / Load project live in the File menu (Ctrl+S / Ctrl+O)
-
-        # the dataset/export folder is chosen (and shown) in the Settings window
-        exp_row = QHBoxLayout()
-        self.exp_page_btn = QPushButton(self._tr("export_page"))
-        self.exp_page_btn.clicked.connect(lambda: self.on_export(False))
-        exp_row.addWidget(self.exp_page_btn)
-        self.exp_all_btn = QPushButton(self._tr("export_all"))
-        self.exp_all_btn.clicked.connect(lambda: self.on_export(True))
-        exp_row.addWidget(self.exp_all_btn)
-        lay.addLayout(exp_row)
 
         self.lbl_intro = QLabel(self._tr("intro"))
         self.lbl_intro.setWordWrap(True)
@@ -1648,7 +1696,7 @@ class TrainerWindow(QMainWindow):
     def _save_settings(self):
         data = {"lang": self._lang, "folder": self._folder,
                 "ai_dir": self._ai_dir, "locked": self._locked,
-                "wand_tol": self._wand_tol}
+                "wand_tol": self._wand_tol, "auto_order_on": self._auto_order}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -1734,11 +1782,39 @@ class TrainerWindow(QMainWindow):
             else:
                 d.setFeatures(QDockWidget.DockWidgetMovable
                               | QDockWidget.DockWidgetFloatable)
+        bar = getattr(self, "action_bar", None)
+        if bar is not None:                       # the actions toolbar too
+            bar.setMovable(not self._locked)
+            bar.setFloatable(not self._locked)
 
     def set_layout_locked(self, locked):
         self._locked = bool(locked)
         self._apply_dock_lock()
         self._save_settings()
+
+    # -- class filter + live auto-order ---------------------------------------
+    def _on_filter_changed(self):
+        key = self.filter_combo.currentData() or "all"
+        self._class_filter = None if key == "all" else key
+        self.overlay.set_kind_filter(self._class_filter)
+        self._current = -1              # drop selection (may now be hidden)
+        self._sel = set()
+        self._refresh()
+
+    def set_auto_order(self, on):
+        self._auto_order = bool(on)
+        self._save_settings()
+        if on:
+            self._maybe_auto_order()
+            self._refresh()
+
+    def _maybe_auto_order(self):
+        """Re-number the reading order after an edit, if the live toggle is on."""
+        if not self._auto_order:
+            return
+        pg = self._page()
+        if pg and pg["boxes"]:
+            auto_order(pg["boxes"], rtl=self.rtl_chk.isChecked())
 
     def _unexported_count(self):
         """Pages that have boxes but have not been exported into the dataset."""
@@ -2092,13 +2168,17 @@ class TrainerWindow(QMainWindow):
         lw.blockSignals(True)
         lw.clear()
         pg = self._page()
+        flt = self._class_filter
         for i, b in enumerate(pg["boxes"] if pg else []):
             order = b.get("order", 0)
             num = str(order) if order else str(i + 1)
             kind = "SFX" if b.get("kind") == "sfx" else "Bubble"
             it = QListWidgetItem("%s   %s" % (num, kind))
-            it.setForeground(QColor(70, 130, 230) if b.get("kind") == "sfx"
-                             else QColor(230, 60, 60))
+            if flt and b.get("kind", "bubble") != flt:
+                it.setForeground(QColor(120, 120, 120))   # filtered out (dim)
+            else:
+                it.setForeground(QColor(70, 130, 230) if b.get("kind") == "sfx"
+                                 else QColor(230, 60, 60))
             it.setData(Qt.UserRole, i)        # original box index, for reordering
             lw.addItem(it)
         cur = getattr(self, "_current", -1)
@@ -2272,6 +2352,7 @@ class TrainerWindow(QMainWindow):
             nb["points"] = [[px + ddx, py + ddy] for px, py in nb["points"]]
         pg["boxes"].append(nb)
         self._current = len(pg["boxes"]) - 1
+        self._maybe_auto_order()
         self._refresh()
 
     # -- auto-save / crash recovery --
@@ -2339,6 +2420,12 @@ class TrainerWindow(QMainWindow):
                                 "fewest", "most")):
             self.sort_combo.setItemText(i, t("sort_" + _k))
         self.next_todo_btn.setText(t("next_todo"))
+        self.lbl_filter.setText(t("show"))
+        for i, _fk in enumerate(("all", "bubble", "sfx")):
+            self.filter_combo.setItemText(i, t("show_" + _fk))
+        self.auto_chk.setText(t("auto_order_live"))
+        self.auto_chk.setToolTip(t("auto_order_live_tip"))
+        self.action_bar.setWindowTitle(t("bar_actions"))
         for _k, _btn in self.tool_btns.items():
             _btn.setToolTip(t("tool_" + _k + "_hint"))
         self.center_chk.setText(t("center_marker"))
@@ -2623,6 +2710,7 @@ class TrainerWindow(QMainWindow):
             box["points"] = points
         pg["boxes"].append(box)
         self._current = len(pg["boxes"]) - 1
+        self._maybe_auto_order()
         self._refresh()
 
     def _on_box_changed(self, idx, x, y, w, h):
@@ -2642,6 +2730,7 @@ class TrainerWindow(QMainWindow):
                            for px, py in pts]
         b.update({"x": nx, "y": ny, "w": nw, "h": nh})
         self._current = idx
+        self._maybe_auto_order()
         self._refresh()
 
     def _on_box_removed(self, idx):
@@ -2650,6 +2739,7 @@ class TrainerWindow(QMainWindow):
             self._push_undo()
             del pg["boxes"][idx]
             self._current = min(getattr(self, "_current", -1), len(pg["boxes"]) - 1)
+            self._maybe_auto_order()
             self._refresh()
 
     def _on_box_clicked(self, idx):
@@ -2738,6 +2828,7 @@ class TrainerWindow(QMainWindow):
             del pg["boxes"][i]
         self._current = -1
         self._sel = set()
+        self._maybe_auto_order()
         self._refresh()
 
     def on_clear(self):
@@ -3167,7 +3258,11 @@ def apply_krita_dark(app):
         "QTabBar::tab{background:#31363b;color:#eff0f1;padding:5px 12px;"
         "border:1px solid #4d4d4d;}"
         "QTabBar::tab:selected{background:#3daee9;color:#ffffff;}"
-        "QMainWindow::separator{background:#31363b;width:5px;height:5px;}")
+        "QMainWindow::separator{background:#31363b;width:5px;height:5px;}"
+        # the movable actions toolbar
+        "QToolBar{background:#31363b;border-top:1px solid #4d4d4d;spacing:3px;"
+        "padding:3px;}"
+        "QToolBar::separator{background:#4d4d4d;width:1px;margin:3px 5px;}")
 
 
 def _resource(*parts):
