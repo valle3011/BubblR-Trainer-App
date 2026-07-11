@@ -94,7 +94,8 @@ just want to label images.
 | Mouse wheel / middle-drag | zoom / pan |
 
 - A **Boxes** list on the right shows every box on the page — click one to
-  select it (handy when boxes overlap).
+  select it (handy when boxes overlap), or **drag items to reorder them**, which
+  sets the reading order (1, 2, 3 …) top-to-bottom.
 - **Auto-recovery:** the session is auto-saved every minute; if the app closed
   unexpectedly, it offers to restore your unsaved work on the next start.
 - The window also remembers its size and position between sessions.

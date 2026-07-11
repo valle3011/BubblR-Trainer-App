@@ -18,12 +18,13 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
-    QDialog, QDialogButtonBox, QListWidget, QListWidgetItem)
+    QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
+    QAbstractItemView)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer
 
-VERSION = "1.6"
+VERSION = "1.7"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -116,7 +117,8 @@ LANG = {
                     "Mouse wheel — zoom     middle-drag — pan\n"
                     "F1 — show this help"),
         "boxes": "Boxes",
-        "boxes_tip": "All boxes on this page — click to select.",
+        "boxes_tip": "All boxes on this page — click to select, "
+                     "drag to reorder (sets the reading order).",
         "copied": "Box copied.",
         "pasted": "Box pasted.",
         "duplicated": "Box duplicated.",
@@ -226,7 +228,8 @@ LANG = {
                     "Mausrad — Zoom     Mittel-Ziehen — verschieben\n"
                     "F1 — diese Hilfe anzeigen"),
         "boxes": "Boxen",
-        "boxes_tip": "Alle Boxen dieser Seite — zum Auswählen anklicken.",
+        "boxes_tip": "Alle Boxen dieser Seite — anklicken zum Auswählen, "
+                     "ziehen zum Umsortieren (setzt die Lesereihenfolge).",
         "copied": "Box kopiert.",
         "pasted": "Box eingefügt.",
         "duplicated": "Box dupliziert.",
@@ -890,7 +893,10 @@ class TrainerWindow(QMainWindow):
         self.box_list = QListWidget()
         self.box_list.setFixedWidth(150)
         self.box_list.setToolTip(self._tr("boxes_tip"))
+        self.box_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.box_list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.box_list.currentRowChanged.connect(self._on_box_list_row)
+        self.box_list.model().rowsMoved.connect(self._on_boxes_reordered)
         box_col.addWidget(self.box_list, 1)
         mid.addLayout(box_col)
         lay.addLayout(mid, 1)
@@ -1116,7 +1122,8 @@ class TrainerWindow(QMainWindow):
     # -- box list panel --
     def _rebuild_box_list(self):
         lw = self.box_list
-        lw.blockSignals(True)                # avoid feedback while repopulating
+        self._rebuilding_list = True         # ignore model moves while filling
+        lw.blockSignals(True)
         lw.clear()
         pg = self._page()
         for i, b in enumerate(pg["boxes"] if pg else []):
@@ -1126,16 +1133,42 @@ class TrainerWindow(QMainWindow):
             it = QListWidgetItem("%s   %s" % (num, kind))
             it.setForeground(QColor(70, 130, 230) if b.get("kind") == "sfx"
                              else QColor(230, 60, 60))
+            it.setData(Qt.UserRole, i)        # original box index, for reordering
             lw.addItem(it)
         cur = getattr(self, "_current", -1)
         lw.setCurrentRow(cur if 0 <= cur < lw.count() else -1)
         lw.blockSignals(False)
+        self._rebuilding_list = False
 
     def _on_box_list_row(self, row):
         pg = self._page()
         if pg and 0 <= row < len(pg["boxes"]) and row != self._current:
             self._current = row
             self._refresh()
+
+    def _on_boxes_reordered(self, *_args):
+        """A drag in the box list reorders the boxes and (re)numbers the reading
+        order to match the new top-to-bottom order."""
+        if getattr(self, "_rebuilding_list", False):
+            return
+        pg = self._page()
+        if not pg:
+            return
+        lw = self.box_list
+        order = [lw.item(r).data(Qt.UserRole) for r in range(lw.count())]
+        n = len(pg["boxes"])
+        if len(order) != n or any(x is None for x in order) \
+                or sorted(order) != list(range(n)):
+            return                            # unexpected -> leave data untouched
+        self._push_undo()
+        old = pg["boxes"]
+        cur_old = getattr(self, "_current", -1)
+        pg["boxes"] = [old[i] for i in order]
+        for pos, b in enumerate(pg["boxes"], 1):   # drag == set reading order
+            b["order"] = pos
+        self._order_counter = n + 1
+        self._current = order.index(cur_old) if 0 <= cur_old < n else -1
+        self._refresh()
 
     # -- copy / paste / duplicate a box --
     def on_copy_box(self):
