@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.3"
+VERSION = "5.4"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -207,6 +207,8 @@ LANG = {
         "settings_display": "Display", "settings_tools": "Tools",
         "settings_newbox": "New boxes", "settings_storage": "Storage location",
         "settings_discord": "Discord",
+        "mi_discord": "Show on Discord",
+        "discord_need_id": "Set your Discord Application ID in Settings → Discord.",
         "discord_enable": "Show “in BubblR Trainer” on Discord",
         "discord_id": "Discord Application ID",
         "discord_hint": "Rich Presence needs a free Discord application. Open "
@@ -413,6 +415,9 @@ LANG = {
         "settings_display": "Anzeige", "settings_tools": "Werkzeuge",
         "settings_newbox": "Neue Boxen", "settings_storage": "Speicherort",
         "settings_discord": "Discord",
+        "mi_discord": "Auf Discord anzeigen",
+        "discord_need_id": "Trage deine Discord-Application-ID unter "
+                           "Einstellungen → Discord ein.",
         "discord_enable": "„in BubblR Trainer“ auf Discord anzeigen",
         "discord_id": "Discord-Application-ID",
         "discord_hint": "Rich Presence braucht eine kostenlose Discord-Anwendung. "
@@ -1938,6 +1943,14 @@ class TrainerWindow(QMainWindow):
                    if p["boxes"] and not p.get("exported"))
 
     # -- Discord Rich Presence ------------------------------------------------
+    def _toggle_discord(self, on):
+        """Quick on/off from the View menu (mirrors the Settings checkbox)."""
+        self._discord_enabled = bool(on)
+        self._save_settings()
+        if on and not self._discord_id.strip():
+            self._status(self._tr("discord_need_id"), error=True)
+        self._start_discord()
+
     def _start_discord(self):
         """(Re)start or stop the Discord presence to match the settings."""
         if self._discord is not None:
@@ -1947,6 +1960,11 @@ class TrainerWindow(QMainWindow):
             self._discord = DiscordPresence(self._discord_id.strip())
             self._discord.start()
             self._update_discord()
+        # keep the View-menu toggle in sync with the current state
+        if hasattr(self, "discord_action"):
+            self.discord_action.blockSignals(True)
+            self.discord_action.setChecked(self._discord_enabled)
+            self.discord_action.blockSignals(False)
 
     def _update_discord(self):
         """Push the current page / progress to Discord (cheap; the presence
@@ -2193,6 +2211,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_fit", lambda: self.overlay.fit(), None),
                 None,
                 ("mi_lock_panels", "__lock__", None),
+                ("mi_discord", "__discord__", None),
             ]),
             ("m_settings", self._open_settings),   # opens the Settings window
             ("m_help", [
@@ -2220,6 +2239,14 @@ class TrainerWindow(QMainWindow):
                     act.setChecked(self._locked)
                     act.toggled.connect(self.set_layout_locked)
                     self.lock_action = act
+                    self._menu_actions.append((act, akey))
+                    continue
+                if fn == "__discord__":           # checkable Discord toggle
+                    act = menu.addAction(self._tr(akey))
+                    act.setCheckable(True)
+                    act.setChecked(self._discord_enabled)
+                    act.toggled.connect(self._toggle_discord)
+                    self.discord_action = act
                     self._menu_actions.append((act, akey))
                     continue
                 act = menu.addAction(self._tr(akey))
