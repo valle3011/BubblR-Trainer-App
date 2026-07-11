@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.3"
+VERSION = "2.4"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -154,6 +154,7 @@ LANG = {
         "mi_undo": "Undo", "mi_redo": "Redo",
         "mi_copy": "Copy box", "mi_paste": "Paste box",
         "mi_dup": "Duplicate box", "mi_del": "Delete box",
+        "mi_select_all": "Select all boxes",
         "mi_bubble": "Mark as Bubble", "mi_sfx": "Mark as SFX",
         "mi_clear_order": "Clear reading order",
         "mi_prev": "Previous page", "mi_next": "Next page",
@@ -309,6 +310,7 @@ LANG = {
         "mi_undo": "Rückgängig", "mi_redo": "Wiederherstellen",
         "mi_copy": "Box kopieren", "mi_paste": "Box einfügen",
         "mi_dup": "Box duplizieren", "mi_del": "Box löschen",
+        "mi_select_all": "Alle Boxen auswählen",
         "mi_bubble": "Als Bubble markieren", "mi_sfx": "Als SFX markieren",
         "mi_clear_order": "Lesereihenfolge löschen",
         "mi_prev": "Vorige Seite", "mi_next": "Nächste Seite",
@@ -417,6 +419,7 @@ class BoxOverlay(QWidget):
     # x, y, w, h, shape ("rect"/"ellipse"/"lasso"/"wand"), points (list or None)
     boxAdded = pyqtSignal(float, float, float, float, str, object)
     boxChanged = pyqtSignal(int, float, float, float, float)
+    rubberSelect = pyqtSignal(float, float, float, float)  # x, y, w, h in doc
 
     _HANDLE = 9
     # which box edges a handle moves ('l'eft 'r'ight 't'op 'b'ottom)
@@ -438,6 +441,7 @@ class BoxOverlay(QWidget):
         self._pan_x = 0.0
         self._pan_y = 0.0
         self._panning = None      # last pos while middle-drag panning
+        self._rubber = None       # rubber-band rectangle while view-mode drag
         self._tool = "rect"       # rect | ellipse | lasso | wand
         self._show_center = True  # draw a marker at each box's centre
         self._wand_tol = 40       # magic-wand colour tolerance (0..255)
@@ -592,6 +596,15 @@ class BoxOverlay(QWidget):
             p.fillRect(tag, QColor(60, 200, 90))
             p.setPen(QPen(QColor(255, 255, 255)))
             p.drawText(tag, Qt.AlignCenter, info)
+        # rubber-band selection rectangle
+        if self._rubber is not None:
+            rx, ry, rw, rh = self._norm(self._rubber["x0"], self._rubber["y0"],
+                                        self._rubber["cx"], self._rubber["cy"])
+            rr = QRectF(t.x() + rx * scale, t.y() + ry * scale,
+                        rw * scale, rh * scale)
+            p.setPen(QPen(QColor(255, 255, 255, 200), 1, Qt.DashLine))
+            p.setBrush(QBrush(QColor(120, 170, 255, 45)))
+            p.drawRect(rr)
         p.end()
 
     def _draw_shape(self, p, r, shape, points, t, scale, closed=True):
@@ -771,6 +784,9 @@ class BoxOverlay(QWidget):
         idx = self._hit(event.pos())
         if idx >= 0:
             self.boxClicked.emit(idx)
+        else:                                # empty space -> rubber-band select
+            dx, dy = self._to_doc(event.pos())
+            self._rubber = {"x0": dx, "y0": dy, "cx": dx, "cy": dy}
 
     def keyPressEvent(self, event):
         # arrow keys nudge the selected box (Shift = 10 px); pan otherwise
@@ -833,6 +849,10 @@ class BoxOverlay(QWidget):
             self._panning = event.pos()
             self.update()
             return
+        if self._rubber is not None:
+            self._rubber["cx"], self._rubber["cy"] = self._to_doc(event.pos())
+            self.update()
+            return
         if not self._edit:
             return
         if self._drag is None:
@@ -853,6 +873,12 @@ class BoxOverlay(QWidget):
         if event.button() == Qt.MiddleButton and self._panning is not None:
             self._panning = None
             self.setCursor(Qt.CrossCursor if self._edit else Qt.ArrowCursor)
+            return
+        if self._rubber is not None and event.button() == Qt.LeftButton:
+            r, self._rubber = self._rubber, None
+            x, y, w, h = self._norm(r["x0"], r["y0"], r["cx"], r["cy"])
+            self.update()
+            self.rubberSelect.emit(x, y, w, h)
             return
         if not self._edit or self._drag is None:
             return
@@ -1066,6 +1092,7 @@ class TrainerWindow(QMainWindow):
         self.overlay.boxChanged.connect(self._on_box_changed)
         self.overlay.boxRemoved.connect(self._on_box_removed)
         self.overlay.boxClicked.connect(self._on_box_clicked)
+        self.overlay.rubberSelect.connect(self._on_rubber_select)
         mid = QHBoxLayout()
         mid.addWidget(self.overlay, 1)
         box_col = QVBoxLayout()
@@ -1310,6 +1337,34 @@ class TrainerWindow(QMainWindow):
             self._sel = set()
             self._refresh()
 
+    def _on_rubber_select(self, x, y, w, h):
+        """A drag-rectangle in view mode selects every box it overlaps; a click
+        on empty space (tiny rectangle) clears the selection."""
+        pg = self._page()
+        if not pg:
+            return
+        if w < 3 and h < 3:
+            self._deselect()
+            return
+        rx1, ry1 = x + w, y + h
+        sel = {i for i, b in enumerate(pg["boxes"])
+               if b["x"] < rx1 and b["x"] + b["w"] > x
+               and b["y"] < ry1 and b["y"] + b["h"] > y}
+        self._sel = sel
+        self._current = max(sel) if sel else -1
+        if 0 <= self._current < len(pg["boxes"]):
+            k = pg["boxes"][self._current].get("kind", "bubble")
+            self._set_kind_buttons(k)
+            self._new_kind = k
+        self._refresh()
+
+    def on_select_all(self):
+        pg = self._page()
+        if pg and pg["boxes"]:
+            self._sel = set(range(len(pg["boxes"])))
+            self._current = len(pg["boxes"]) - 1
+            self._refresh()
+
     def _show_shortcuts(self):
         QMessageBox.information(self, self._tr("sh_title"), self._tr("sh_text"))
 
@@ -1345,6 +1400,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_dup", self.on_duplicate_box, "Ctrl+D"),
                 ("mi_del", self.on_delete, ["Del", "Backspace"]),
                 ("fit_box", self.on_fit_box, "F"),
+                ("mi_select_all", self.on_select_all, "Ctrl+A"),
                 None,
                 ("mi_bubble", lambda: self._kbd_set_kind("bubble"), "B"),
                 ("mi_sfx", lambda: self._kbd_set_kind("sfx"), "S"),

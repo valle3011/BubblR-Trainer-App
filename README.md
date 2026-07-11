@@ -91,6 +91,8 @@ buttons do, each item showing its shortcut.
 | **Ctrl+C** / **Ctrl+V** | copy / paste a box (also from one page onto another) |
 | **Ctrl+D** | duplicate the selected box |
 | **Ctrl+click** (or the Boxes list) | select several boxes — delete/relabel act on all |
+| **drag on empty space** (view mode) | rubber-band: select every box the rectangle covers |
+| **Ctrl+A** | select all boxes on the page |
 | **F** | fit the selected box tightly onto the bubble |
 | **Esc** | deselect |
 | **[** / **]** | previous / next page |
