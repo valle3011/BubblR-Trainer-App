@@ -13,10 +13,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
-python -c "import PyQt5" 1>nul 2>&1
-if errorlevel 1 (
-  echo PyQt5 wird einmalig installiert ...
-  python -m pip install PyQt5
+rem PyQt5 nur EINMAL pruefen/installieren (Marker-Datei). Jeder weitere Start
+rem spart so den zusaetzlichen Python-Prozess fuer den Import-Check -> schneller.
+if not exist ".deps_ok" (
+  python -c "import PyQt5" 1>nul 2>&1
+  if errorlevel 1 (
+    echo PyQt5 wird einmalig installiert ...
+    python -m pip install PyQt5
+    if errorlevel 1 (
+      echo [FEHLER] PyQt5 konnte nicht installiert werden.
+      pause
+      exit /b 1
+    )
+  )
+  echo ok> ".deps_ok"
 )
 
 python bubblr_trainer_app.py %*
