@@ -22,9 +22,9 @@ from PyQt5.QtWidgets import (
     QAbstractItemView)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer, QSize
 
-VERSION = "1.7"
+VERSION = "1.8"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -119,6 +119,7 @@ LANG = {
         "boxes": "Boxes",
         "boxes_tip": "All boxes on this page — click to select, "
                      "drag to reorder (sets the reading order).",
+        "strip_tip": "Page thumbnails — click to jump. ✓ = already has boxes.",
         "copied": "Box copied.",
         "pasted": "Box pasted.",
         "duplicated": "Box duplicated.",
@@ -230,6 +231,7 @@ LANG = {
         "boxes": "Boxen",
         "boxes_tip": "Alle Boxen dieser Seite — anklicken zum Auswählen, "
                      "ziehen zum Umsortieren (setzt die Lesereihenfolge).",
+        "strip_tip": "Seiten-Miniaturen — anklicken zum Springen. ✓ = hat Boxen.",
         "copied": "Box kopiert.",
         "pasted": "Box eingefügt.",
         "duplicated": "Box dupliziert.",
@@ -901,6 +903,21 @@ class TrainerWindow(QMainWindow):
         mid.addLayout(box_col)
         lay.addLayout(mid, 1)
 
+        # horizontal strip of page thumbnails: click to jump, ✓ = labelled
+        self.page_strip = QListWidget()
+        self.page_strip.setViewMode(QListWidget.IconMode)
+        self.page_strip.setFlow(QListWidget.LeftToRight)
+        self.page_strip.setWrapping(False)
+        self.page_strip.setMovement(QListWidget.Static)
+        self.page_strip.setIconSize(QSize(78, 88))
+        self.page_strip.setFixedHeight(122)
+        self.page_strip.setSpacing(4)
+        self.page_strip.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.page_strip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.page_strip.setToolTip(self._tr("strip_tip"))
+        self.page_strip.currentRowChanged.connect(self._on_page_strip_row)
+        lay.addWidget(self.page_strip)
+
         shape_row = QHBoxLayout()
         self.lbl_tool = QLabel(self._tr("tool"))
         shape_row.addWidget(self.lbl_tool)
@@ -1170,6 +1187,54 @@ class TrainerWindow(QMainWindow):
         self._current = order.index(cur_old) if 0 <= cur_old < n else -1
         self._refresh()
 
+    # -- page thumbnail strip --
+    def _page_thumb(self, pg):
+        px = pg.get("thumb")
+        if px is None:
+            scaled = pg["img"].scaled(QSize(78, 88), Qt.KeepAspectRatio,
+                                      Qt.SmoothTransformation)
+            px = QPixmap.fromImage(scaled)
+            pg["thumb"] = px
+        return px
+
+    @staticmethod
+    def _page_strip_label(i, pg):
+        return ("%d ✓" % (i + 1)) if pg["boxes"] else str(i + 1)
+
+    def _rebuild_page_strip(self):
+        lw = self.page_strip
+        lw.blockSignals(True)
+        lw.clear()
+        for i, pg in enumerate(self._pages):
+            it = QListWidgetItem(QIcon(self._page_thumb(pg)),
+                                 self._page_strip_label(i, pg))
+            it.setToolTip("%s  (%d)" % (pg["name"], len(pg["boxes"])))
+            it.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
+            lw.addItem(it)
+        lw.setCurrentRow(self._cur if 0 <= self._cur < len(self._pages) else -1)
+        lw.blockSignals(False)
+        self._strip_sig = [id(p) for p in self._pages]
+
+    def _sync_page_strip(self):
+        if not hasattr(self, "page_strip"):
+            return
+        sig = [id(p) for p in self._pages]
+        if sig != getattr(self, "_strip_sig", None):
+            self._rebuild_page_strip()       # pages added/removed/reordered
+            return
+        cur = self._cur
+        lw = self.page_strip
+        if 0 <= cur < lw.count():            # refresh current page's ✓ + highlight
+            lw.blockSignals(True)
+            lw.item(cur).setText(self._page_strip_label(cur, self._pages[cur]))
+            if lw.currentRow() != cur:
+                lw.setCurrentRow(cur)
+            lw.blockSignals(False)
+
+    def _on_page_strip_row(self, row):
+        if 0 <= row < len(self._pages) and row != self._cur:
+            self._goto(row)
+
     # -- copy / paste / duplicate a box --
     def on_copy_box(self):
         pg = self._page()
@@ -1262,6 +1327,7 @@ class TrainerWindow(QMainWindow):
         self.lbl_intro.setText(t("intro"))
         self.lbl_boxes.setText(t("boxes"))
         self.box_list.setToolTip(t("boxes_tip"))
+        self.page_strip.setToolTip(t("strip_tip"))
         self.load_btn.setText(t("load"))
         self.lbl_sort.setText(t("sort_by"))
         for i, _k in enumerate(("name", "unlabeled", "fewest", "most")):
@@ -1332,6 +1398,7 @@ class TrainerWindow(QMainWindow):
             self.page_lbl.setText(self._tr("page_none"))
         if hasattr(self, "box_list"):
             self._rebuild_box_list()
+        self._sync_page_strip()
 
     def _refresh_folder_label(self):
         self.folder_lbl.setText(

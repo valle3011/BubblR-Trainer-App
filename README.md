@@ -93,6 +93,8 @@ just want to label images.
 | **Ctrl+W** | close the current page |
 | Mouse wheel / middle-drag | zoom / pan |
 
+- A **page thumbnail strip** under the image lets you jump to any page with a
+  click; a **✓** marks pages that already have boxes.
 - A **Boxes** list on the right shows every box on the page — click one to
   select it (handy when boxes overlap), or **drag items to reorder them**, which
   sets the reading order (1, 2, 3 …) top-to-bottom.
