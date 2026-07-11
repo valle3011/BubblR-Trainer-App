@@ -84,7 +84,8 @@ just want to label images.
 5. Choose a **dataset folder** (once — can be a shared Drive folder).
 6. **Export this page** or **Export all pages**.
 
-There's a **menu bar** (File / Edit / Page / View / Help) with everything the
+There's a **menu bar** (File / Edit / Page / View / Settings / Help) with
+everything the
 buttons do, each item showing its shortcut.
 
 ### Keyboard shortcuts (press **F1** in the app for this list)
@@ -155,8 +156,11 @@ Classes: **bubble = 0**, **sfx = 1**.
   button just points you to it (it looks for the AI folder next to the app, or
   you pick it once). The ranking runs in the background; the model load makes
   the first run take a moment.
-- Settings (language, dataset folder) are stored in `~/.bubblr_trainer.json`.
-- Bilingual (English / Deutsch) — switch with the dropdown at the top-right.
+- **Settings** (menu bar → *Settings*) opens a small window with two tabs on
+  the left: **Display** (interface language) and **Storage location** (pick the
+  dataset/export folder and see its current path). Both are stored in
+  `~/.bubblr_trainer.json`.
+- Bilingual (English / Deutsch) — switch it under Settings → Display.
 - **Make a no-Python `.exe`:** double-click **`build_exe.bat`** (installs
   PyInstaller if needed, then builds). Result: the folder
   `dist/BubblR-Trainer/` with **`BubblR-Trainer.exe`** inside — no Python or

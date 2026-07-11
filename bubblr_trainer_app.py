@@ -20,13 +20,14 @@ from PyQt5.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-    QAbstractItemView, QInputDialog, QActionGroup, QMenu)
+    QAbstractItemView, QInputDialog, QActionGroup, QMenu,
+    QStackedWidget, QRadioButton)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.8"
+VERSION = "3.9"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -187,6 +188,10 @@ LANG = {
         "save": "Save project…", "load_proj": "Load project…",
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
+        "settings_display": "Display", "settings_storage": "Storage location",
+        "settings_folder_title": "Dataset / export folder",
+        "settings_folder_none": "(no folder chosen yet)",
+        "settings_open": "Settings…",
         "export_page": "Export this page", "export_all": "Export all pages",
         "ready": "Load page images to begin.",
         "loaded": "{n} image(s) loaded.",
@@ -355,6 +360,10 @@ LANG = {
         "save": "Projekt speichern…", "load_proj": "Projekt laden…",
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
+        "settings_display": "Anzeige", "settings_storage": "Speicherort",
+        "settings_folder_title": "Dataset-/Export-Ordner",
+        "settings_folder_none": "(noch kein Ordner gewählt)",
+        "settings_open": "Einstellungen…",
         "export_page": "Diese Seite exportieren", "export_all": "Alle Seiten exportieren",
         "ready": "Zum Start Seitenbilder laden.",
         "loaded": "{n} Bild(er) geladen.",
@@ -1419,11 +1428,7 @@ class TrainerWindow(QMainWindow):
         io_row.addWidget(self.loadp_btn)
         lay.addLayout(io_row)
 
-        # dataset/export folder is chosen via Settings; here we just show it
-        self.folder_lbl = QLabel("")
-        self.folder_lbl.setWordWrap(True)
-        lay.addWidget(self.folder_lbl)
-
+        # the dataset/export folder is chosen (and shown) in the Settings window
         exp_row = QHBoxLayout()
         self.exp_page_btn = QPushButton(self._tr("export_page"))
         self.exp_page_btn.clicked.connect(lambda: self.on_export(False))
@@ -1465,7 +1470,6 @@ class TrainerWindow(QMainWindow):
         self._autosave_timer.timeout.connect(self._autosave)
         self._autosave_timer.start(60000)
 
-        self._refresh_folder_label()
         self._refresh()
 
     # -- settings / i18n --
@@ -1669,10 +1673,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_zoom_sel", self.on_zoom_selection, "Z"),
                 ("mi_fit", lambda: self.overlay.fit(), None),
             ]),
-            ("m_settings", [
-                ("__lang__", None, None),        # Language submenu
-                ("mi_folder", self.on_choose_folder, None),
-            ]),
+            ("m_settings", self._open_settings),   # opens the Settings window
             ("m_help", [
                 ("mi_shortcuts", self._show_shortcuts, "F1"),
                 ("mi_about", self._show_about, None),
@@ -1680,6 +1681,11 @@ class TrainerWindow(QMainWindow):
         ]
         mb = self.menuBar()
         for mkey, items in spec:
+            if callable(items):            # a menu-bar entry that opens a dialog
+                act = mb.addAction(self._tr(mkey))
+                act.triggered.connect(lambda _c=False, f=items: f())
+                self._menu_actions.append((act, mkey))
+                continue
             menu = mb.addMenu(self._tr(mkey))
             self._menu_titles.append((menu, mkey))
             for item in items:
@@ -1687,9 +1693,6 @@ class TrainerWindow(QMainWindow):
                     menu.addSeparator()
                     continue
                 akey, fn, sc = item
-                if akey == "__lang__":
-                    self._build_language_menu(menu)
-                    continue
                 act = menu.addAction(self._tr(akey))
                 if isinstance(sc, (list, tuple)):
                     act.setShortcuts([QKeySequence(s) for s in sc])
@@ -1698,17 +1701,84 @@ class TrainerWindow(QMainWindow):
                 act.triggered.connect(lambda _checked=False, f=fn: f())
                 self._menu_actions.append((act, akey))
 
-    def _build_language_menu(self, parent):
-        sub = parent.addMenu(self._tr("mi_language"))
-        self._menu_titles.append((sub, "mi_language"))
-        grp = QActionGroup(self)
-        grp.setExclusive(True)
-        for code, label in (("en", "English"), ("de", "Deutsch")):
-            act = sub.addAction(label)          # names are proper nouns (no i18n)
-            act.setCheckable(True)
-            act.setChecked(self._lang == code)
-            grp.addAction(act)
-            act.triggered.connect(lambda _c=False, cd=code: self._set_lang(cd))
+    def _open_settings(self):
+        """Modal Settings window with a left-hand tab list: Display (language)
+        and Storage location (dataset/export folder chooser + current path)."""
+        dlg = QDialog(self)
+        dlg.setMinimumSize(560, 320)
+        outer = QHBoxLayout(dlg)
+        nav = QListWidget()
+        nav.setFixedWidth(150)
+        stack = QStackedWidget()
+
+        # -- Display page: language --
+        disp = QWidget()
+        dv = QVBoxLayout(disp)
+        lang_title = QLabel()
+        lang_title.setStyleSheet("font-weight: bold;")
+        dv.addWidget(lang_title)
+        grp = QButtonGroup(dlg)
+        rb_en, rb_de = QRadioButton("English"), QRadioButton("Deutsch")
+        grp.addButton(rb_en)
+        grp.addButton(rb_de)
+        rb_en.setChecked(self._lang == "en")
+        rb_de.setChecked(self._lang == "de")
+        dv.addWidget(rb_en)
+        dv.addWidget(rb_de)
+        dv.addStretch(1)
+
+        # -- Storage page: dataset/export folder --
+        store = QWidget()
+        sv = QVBoxLayout(store)
+        store_title = QLabel()
+        store_title.setStyleSheet("font-weight: bold;")
+        sv.addWidget(store_title)
+        choose_btn = QPushButton()
+        path_lbl = QLabel()
+        path_lbl.setWordWrap(True)
+        path_lbl.setStyleSheet("color: gray;")
+
+        def choose():
+            self.on_choose_folder()
+            path_lbl.setText(self._folder or self._tr("settings_folder_none"))
+
+        choose_btn.clicked.connect(choose)
+        sv.addWidget(choose_btn)
+        sv.addWidget(path_lbl)
+        sv.addStretch(1)
+
+        stack.addWidget(disp)
+        stack.addWidget(store)
+        nav.currentRowChanged.connect(stack.setCurrentIndex)
+
+        def apply_texts():
+            tr = self._tr
+            dlg.setWindowTitle(tr("m_settings"))
+            row = nav.currentRow()
+            nav.blockSignals(True)
+            nav.clear()
+            nav.addItem(tr("settings_display"))
+            nav.addItem(tr("settings_storage"))
+            nav.setCurrentRow(row if row >= 0 else 0)
+            nav.blockSignals(False)
+            lang_title.setText(tr("mi_language"))
+            store_title.setText(tr("settings_folder_title"))
+            choose_btn.setText(tr("mi_folder"))
+            path_lbl.setText(self._folder or tr("settings_folder_none"))
+
+        def on_lang(code, on):
+            if on and code != self._lang:
+                self._set_lang(code)
+                apply_texts()
+
+        rb_en.toggled.connect(lambda on: on_lang("en", on))
+        rb_de.toggled.connect(lambda on: on_lang("de", on))
+
+        outer.addWidget(nav)
+        outer.addWidget(stack, 1)
+        apply_texts()
+        nav.setCurrentRow(0)
+        dlg.exec_()
 
     def _retranslate_menu(self):
         for menu, key in getattr(self, "_menu_titles", []):
@@ -2004,7 +2074,6 @@ class TrainerWindow(QMainWindow):
         self.loadp_btn.setText(t("load_proj"))
         self.exp_page_btn.setText(t("export_page"))
         self.exp_all_btn.setText(t("export_all"))
-        self._refresh_folder_label()
         self._refresh()
 
     # -- helpers --
@@ -2042,11 +2111,6 @@ class TrainerWindow(QMainWindow):
         if hasattr(self, "box_list"):
             self._rebuild_box_list()
         self._sync_page_strip()
-
-    def _refresh_folder_label(self):
-        self.folder_lbl.setText(
-            self._tr("folder").format(path=self._folder) if self._folder
-            else self._tr("folder_none"))
 
     def _set_kind(self, kind):
         self._new_kind = kind
@@ -2422,7 +2486,6 @@ class TrainerWindow(QMainWindow):
             return
         self._folder = path
         self._save_settings()
-        self._refresh_folder_label()
 
     # -- optional bridge to the BubblR AI ranking tool -----------------------
     def _find_ai_dir(self):
