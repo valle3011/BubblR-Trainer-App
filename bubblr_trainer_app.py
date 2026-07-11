@@ -10,13 +10,15 @@ Run:  python bubblr_trainer_app.py     (needs Python 3 + PyQt5)
 import copy
 import json
 import os
+import subprocess
 import sys
 import time
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
-    QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen)
+    QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
+    QDialog, QDialogButtonBox)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
@@ -25,6 +27,8 @@ VERSION = "1.4"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
+SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
+                             ".bubblr_trainer_shortcut_asked")
 
 LANG = {
     "en": {
@@ -88,6 +92,14 @@ LANG = {
                              "exported.\n\nClose all pages and discard them?",
         "closed": "Page closed.",
         "closed_all": "All pages closed.",
+        "sc_title": "Create a shortcut?",
+        "sc_msg": "Add a BubblR Trainer shortcut for quick access?",
+        "sc_desktop": "On the Desktop",
+        "sc_startmenu": "In the Start menu",
+        "sc_create": "Create",
+        "sc_skip": "Not now",
+        "sc_done": "Shortcut created.",
+        "sc_none": "No location selected.",
         "save": "Save project…", "load_proj": "Load project…",
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
@@ -169,6 +181,14 @@ LANG = {
                              "sind.\n\nAlle Seiten schließen und verwerfen?",
         "closed": "Seite geschlossen.",
         "closed_all": "Alle Seiten geschlossen.",
+        "sc_title": "Verknüpfung anlegen?",
+        "sc_msg": "BubblR Trainer für schnellen Zugriff verknüpfen?",
+        "sc_desktop": "Auf dem Desktop",
+        "sc_startmenu": "Im Startmenü",
+        "sc_create": "Anlegen",
+        "sc_skip": "Nicht jetzt",
+        "sc_done": "Verknüpfung angelegt.",
+        "sc_none": "Kein Ort ausgewählt.",
         "save": "Projekt speichern…", "load_proj": "Projekt laden…",
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
@@ -1495,6 +1515,57 @@ class TrainerWindow(QMainWindow):
             self._refresh()
         self._status(self._tr("loaded_proj").format(n=len(pages)))
 
+    # -- first-run desktop / start-menu shortcut --
+    def maybe_prompt_shortcut(self):
+        """On the very first launch (Windows only), offer to create shortcuts
+        via a clickable dialog. A marker file keeps it from asking again."""
+        if os.name != "nt" or os.path.exists(SHORTCUT_MARK):
+            return
+        try:
+            self._shortcut_dialog()
+        finally:
+            try:
+                with open(SHORTCUT_MARK, "w", encoding="utf-8") as fh:
+                    fh.write("1")
+            except OSError:
+                pass
+
+    def _shortcut_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self._tr("sc_title"))
+        dlg.setWindowIcon(app_icon())
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(self._tr("sc_msg")))
+        cb_desktop = QCheckBox(self._tr("sc_desktop"))
+        cb_desktop.setChecked(True)
+        cb_start = QCheckBox(self._tr("sc_startmenu"))
+        cb_start.setChecked(True)
+        lay.addWidget(cb_desktop)
+        lay.addWidget(cb_start)
+        bb = QDialogButtonBox()
+        bb.addButton(self._tr("sc_create"), QDialogButtonBox.AcceptRole)
+        bb.addButton(self._tr("sc_skip"), QDialogButtonBox.RejectRole)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if dlg.exec_() == QDialog.Accepted:
+            self._create_shortcuts(cb_desktop.isChecked(), cb_start.isChecked())
+
+    def _create_shortcuts(self, desktop, startmenu):
+        if not (desktop or startmenu):
+            self._status(self._tr("sc_none"))
+            return
+        cmd = _shortcut_command(desktop, startmenu)
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # no console flash
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-Command", cmd],
+                creationflags=flags, timeout=30)
+            self._status(self._tr("sc_done"))
+        except Exception as exc:                    # noqa: BLE001
+            self._status(str(exc), error=True)
+
 
 def apply_krita_dark(app):
     """A dark, flat theme in the spirit of Krita's default 'dark' look:
@@ -1550,6 +1621,50 @@ def app_icon():
     return QIcon()
 
 
+def _pythonw():
+    """A windowless interpreter (pythonw) next to the current one, else python."""
+    d = os.path.dirname(sys.executable)
+    for name in ("pythonw.exe", "python.exe"):
+        p = os.path.join(d, name)
+        if os.path.exists(p):
+            return p
+    return sys.executable
+
+
+def _ps_quote(s):
+    """Single-quote a string for PowerShell (doubling any single quotes)."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def _shortcut_command(desktop, startmenu):
+    """A PowerShell command that creates the chosen shortcut(s). Runs a frozen
+    exe directly, else the Python app via pythonw (no console window)."""
+    if getattr(sys, "frozen", False):
+        target, args, workdir = sys.executable, "", os.path.dirname(sys.executable)
+    else:
+        script = os.path.abspath(__file__)
+        target, args, workdir = _pythonw(), '"%s"' % script, os.path.dirname(script)
+    icon = _resource("assets", "icon.ico")
+    folders = []
+    if desktop:
+        folders.append("[Environment]::GetFolderPath('Desktop')")
+    if startmenu:
+        folders.append("[Environment]::GetFolderPath('Programs')")
+    lines = ["$w = New-Object -ComObject WScript.Shell"]
+    for folder in folders:
+        lines += [
+            "$l = Join-Path (%s) 'BubblR Trainer.lnk'" % folder,
+            "$s = $w.CreateShortcut($l)",
+            "$s.TargetPath = %s" % _ps_quote(target),
+            "$s.Arguments = %s" % _ps_quote(args),
+            "$s.WorkingDirectory = %s" % _ps_quote(workdir),
+        ]
+        if os.path.exists(icon):
+            lines.append("$s.IconLocation = %s" % _ps_quote(icon + ",0"))
+        lines += ["$s.Description = 'BubblR Trainer'", "$s.Save()"]
+    return "; ".join(lines)
+
+
 def main():
     app = QApplication(sys.argv)
     apply_krita_dark(app)
@@ -1572,6 +1687,8 @@ def main():
     win.show()
     if splash is not None:
         splash.finish(win)
+    # first launch: offer Desktop / Start-menu shortcuts (clickable dialog)
+    win.maybe_prompt_shortcut()
     # image paths passed on the command line open straight away as pages
     # (used by "Open in BubblR Trainer" in the BubblR AI ranking tool)
     args = [a for a in app.arguments()[1:]

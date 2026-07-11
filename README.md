@@ -12,12 +12,12 @@ just want to label images.
   unpacking) — keep the `BubblR-Trainer` folder together and run the `.exe`
   inside it. Build it yourself with **`build_exe.bat`** (see Notes).
 - **Windows (with Python):** double-click **`run.bat`** — installs PyQt5 the
-  first time, then starts the app. On that first run it also **offers to create
-  a *BubblR Trainer* shortcut on your Desktop and in the Start menu**, so you
-  don't have to open the folder again.
-- **Shortcuts anytime:** run **`make_shortcut.bat`** to (re)create the Desktop +
-  Start-menu shortcuts (with the app icon). It points at the `.exe` if you built
-  one, otherwise at the Python app.
+  first time, then starts the app.
+- **Shortcuts:** on its **first launch** (any way you start it) the app pops up a
+  small **clickable dialog** — tick *Desktop*, *Start menu*, both or neither, and
+  it creates the shortcut(s) with the app icon. No console, asked only once. You
+  can also run **`make_shortcut.bat`** anytime to (re)create both (it targets the
+  `.exe` if you built one, otherwise the Python app).
 - **Any OS / manually:**
   ```
   pip install PyQt5

@@ -4,6 +4,5 @@ build/
 dist/
 *.spec
 .deps_ok
-.shortcut_asked
 .DS_Store
 Thumbs.db

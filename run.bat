@@ -29,19 +29,7 @@ if not exist ".deps_ok" (
   echo ok> ".deps_ok"
 )
 
-rem First run only: offer to create Desktop + Start-menu shortcuts.
-if not exist ".shortcut_asked" call :ask_shortcut
-
+rem The app itself offers a clickable "create shortcut?" dialog on first launch.
 python bubblr_trainer_app.py %*
 if errorlevel 1 pause
 endlocal
-exit /b
-
-:ask_shortcut
-echo.
-choice /C JN /N /M "Verknuepfung auf Desktop und im Startmenue anlegen? (J/N) "
-if errorlevel 2 goto :ask_done
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0make_shortcut.ps1"
-:ask_done
-echo done> ".shortcut_asked"
-exit /b
