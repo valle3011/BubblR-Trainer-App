@@ -43,6 +43,10 @@ just want to label images.
    - drag a corner = resize,
    - right-click a box = delete.
 
+   When boxes overlap, the **currently selected box has priority** — click a box
+   to select it, then editing stays on that box instead of grabbing whatever
+   overlaps it.
+
    Pick a **marking tool** (choosing one also turns drawing on):
    - **▭ Rectangle** — the classic corner-to-corner box.
    - **◯ Ellipse** — drag an oval (nice for round bubbles); the saved box is its

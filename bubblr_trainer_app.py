@@ -21,7 +21,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
 
-VERSION = "1.3"
+VERSION = "1.4"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -477,27 +477,47 @@ class BoxOverlay(QWidget):
         scale = t.width() / float(self._doc_w)
         return (pos.x() - t.x()) / scale, (pos.y() - t.y()) / scale
 
+    def _probe_box(self, k, pos, t, scale):
+        """What the point hits on box `k`: (k, corner) for a resize handle,
+        (k, 'move') inside the box, or None."""
+        b = self._boxes[k]
+        x0 = t.x() + b["x"] * scale
+        y0 = t.y() + b["y"] * scale
+        x1 = x0 + b["w"] * scale
+        y1 = y0 + b["h"] * scale
+        corners = {"nw": (x0, y0), "ne": (x1, y0),
+                   "sw": (x0, y1), "se": (x1, y1)}
+        for name, (cx, cy) in corners.items():
+            if abs(pos.x() - cx) <= self._HANDLE \
+                    and abs(pos.y() - cy) <= self._HANDLE:
+                return (k, name)
+        if x0 <= pos.x() <= x1 and y0 <= pos.y() <= y1:
+            return (k, "move")
+        return None
+
     def _handle_at(self, pos):
         t = self._target()
         if t.width() <= 0:
             return None
         scale = t.width() / float(self._doc_w)
+        # The currently selected box has priority: when boxes overlap, editing
+        # stays on the box you picked instead of grabbing whatever is on top.
+        cur = getattr(self, "_current", -1)
+        if 0 <= cur < len(self._boxes):
+            hit = self._probe_box(cur, pos, t, scale)
+            if hit is not None:
+                return hit
+        # otherwise: any corner wins (resize), else the smallest box (move)
         best, best_area = None, None
-        for k, b in enumerate(self._boxes):
-            x0 = t.x() + b["x"] * scale
-            y0 = t.y() + b["y"] * scale
-            x1 = x0 + b["w"] * scale
-            y1 = y0 + b["h"] * scale
-            corners = {"nw": (x0, y0), "ne": (x1, y0),
-                       "sw": (x0, y1), "se": (x1, y1)}
-            for name, (cx, cy) in corners.items():
-                if abs(pos.x() - cx) <= self._HANDLE \
-                        and abs(pos.y() - cy) <= self._HANDLE:
-                    return (k, name)
-            if x0 <= pos.x() <= x1 and y0 <= pos.y() <= y1:
-                area = b["w"] * b["h"]
-                if best_area is None or area < best_area:
-                    best, best_area = (k, "move"), area
+        for k in range(len(self._boxes)):
+            hit = self._probe_box(k, pos, t, scale)
+            if hit is None:
+                continue
+            if hit[1] != "move":
+                return hit
+            area = self._boxes[k]["w"] * self._boxes[k]["h"]
+            if best_area is None or area < best_area:
+                best, best_area = hit, area
         return best
 
     @staticmethod
