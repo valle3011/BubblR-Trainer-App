@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.0"
+VERSION = "5.1"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1618,6 +1618,7 @@ class TrainerWindow(QMainWindow):
         # the dock POSITIONS but not their SIZES right. Deferring to showEvent
         # makes the panel widths/heights persist correctly across runs.
         self._pending_dockstate = cfg.get("dockstate")
+        self._pending_dock_sizes = cfg.get("dock_sizes")
 
         # menu bar (also carries the keyboard shortcuts); Esc stays a shortcut
         self._build_menu()
@@ -1652,6 +1653,13 @@ class TrainerWindow(QMainWindow):
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
+            # explicit per-dock sizes: restoreState is unreliable for these, so
+            # we re-apply them ourselves with resizeDocks on the next start
+            sizes = {}
+            for d in getattr(self, "_docks", []):
+                sizes[d.objectName()] = {"w": d.width(), "h": d.height(),
+                                         "floating": d.isFloating()}
+            data["dock_sizes"] = sizes
         except Exception:                    # noqa: BLE001
             pass
         try:
@@ -1788,6 +1796,32 @@ class TrainerWindow(QMainWindow):
                     self._apply_dock_lock()
                 except Exception:            # noqa: BLE001
                     pass
+            # restoreState is unreliable for dock SIZES, so force them, and once
+            # more after the layout settles (singleShot 0)
+            self._restore_dock_sizes()
+            QTimer.singleShot(0, self._restore_dock_sizes)
+
+    def _restore_dock_sizes(self):
+        """Force each dock back to the width/height it had last session."""
+        sizes = getattr(self, "_pending_dock_sizes", None)
+        if not sizes:
+            return
+        hor_d, hor_w, ver_d, ver_h = [], [], [], []
+        for d in getattr(self, "_docks", []):
+            info = sizes.get(d.objectName())
+            if not info or d.isFloating():
+                continue
+            area = self.dockWidgetArea(d)
+            if area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea):
+                hor_d.append(d)
+                hor_w.append(int(info.get("w") or d.width()))
+            elif area in (Qt.TopDockWidgetArea, Qt.BottomDockWidgetArea):
+                ver_d.append(d)
+                ver_h.append(int(info.get("h") or d.height()))
+        if hor_d:
+            self.resizeDocks(hor_d, hor_w, Qt.Horizontal)
+        if ver_d:
+            self.resizeDocks(ver_d, ver_h, Qt.Vertical)
 
     def closeEvent(self, event):
         n = self._unexported_count()
