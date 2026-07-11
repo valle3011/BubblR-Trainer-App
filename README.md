@@ -49,7 +49,9 @@ just want to label images.
    - drag inside a box = move,
    - drag a **corner or edge** = resize (the cursor shows what you'll grab),
    - right-click a box (or a row in the Boxes list) = **context menu**
-     (delete, duplicate, fit to bubble, mark as Bubble/SFX).
+     (delete, duplicate, fit to bubble, mark as Bubble/SFX),
+   - right-click **empty space** = canvas menu (**paste a box right where you
+     clicked**, select all, deselect, fit to window).
 
    When boxes overlap, the **currently selected box has priority** — click a box
    to select it, then editing stays on that box instead of grabbing whatever

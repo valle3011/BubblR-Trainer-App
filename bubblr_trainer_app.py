@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.9"
+VERSION = "3.0"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -158,7 +158,7 @@ LANG = {
         "mi_undo": "Undo", "mi_redo": "Redo",
         "mi_copy": "Copy box", "mi_paste": "Paste box",
         "mi_dup": "Duplicate box", "mi_del": "Delete box",
-        "mi_select_all": "Select all boxes",
+        "mi_select_all": "Select all boxes", "mi_deselect": "Deselect",
         "mi_bubble": "Mark as Bubble", "mi_sfx": "Mark as SFX",
         "mi_clear_order": "Clear reading order",
         "mi_prev": "Previous page", "mi_next": "Next page",
@@ -318,7 +318,7 @@ LANG = {
         "mi_undo": "Rückgängig", "mi_redo": "Wiederherstellen",
         "mi_copy": "Box kopieren", "mi_paste": "Box einfügen",
         "mi_dup": "Box duplizieren", "mi_del": "Box löschen",
-        "mi_select_all": "Alle Boxen auswählen",
+        "mi_select_all": "Alle Boxen auswählen", "mi_deselect": "Auswahl aufheben",
         "mi_bubble": "Als Bubble markieren", "mi_sfx": "Als SFX markieren",
         "mi_clear_order": "Lesereihenfolge löschen",
         "mi_prev": "Vorige Seite", "mi_next": "Nächste Seite",
@@ -429,6 +429,7 @@ class BoxOverlay(QWidget):
     boxChanged = pyqtSignal(int, float, float, float, float)
     rubberSelect = pyqtSignal(float, float, float, float)  # x, y, w, h in doc
     boxContextMenu = pyqtSignal(int, QPoint)               # idx, global pos
+    canvasContextMenu = pyqtSignal(float, float, QPoint)   # doc x, y, global pos
 
     _HANDLE = 9
     # which box edges a handle moves ('l'eft 'r'ight 't'op 'b'ottom)
@@ -800,6 +801,9 @@ class BoxOverlay(QWidget):
             idx = self._hit(event.pos())
             if idx >= 0:
                 self.boxContextMenu.emit(idx, event.globalPos())
+            else:
+                dx, dy = self._to_doc(event.pos())
+                self.canvasContextMenu.emit(dx, dy, event.globalPos())
             return
         if event.button() != Qt.LeftButton:
             return
@@ -1109,6 +1113,7 @@ class TrainerWindow(QMainWindow):
         self.overlay.boxClicked.connect(self._on_box_clicked)
         self.overlay.rubberSelect.connect(self._on_rubber_select)
         self.overlay.boxContextMenu.connect(self._on_box_context)
+        self.overlay.canvasContextMenu.connect(self._on_canvas_context)
         mid = QHBoxLayout()
         mid.addWidget(self.overlay, 1)
         box_col = QVBoxLayout()
@@ -1409,6 +1414,27 @@ class TrainerWindow(QMainWindow):
             self.box_list.clearSelection()   # selecting fires the sel handler
             it.setSelected(True)
         self._show_box_menu(self.box_list.viewport().mapToGlobal(pos))
+
+    def _on_canvas_context(self, docx, docy, gpos):
+        t = self._tr
+        menu = QMenu(self)
+        act = menu.addAction(t("mi_paste"), lambda: self.on_paste_at(docx, docy))
+        act.setEnabled(self._clipboard_box is not None)
+        menu.addSeparator()
+        menu.addAction(t("mi_select_all"), lambda: self.on_select_all())
+        menu.addAction(t("mi_deselect"), lambda: self._deselect())
+        menu.addAction(t("mi_fit"), lambda: self.overlay.fit())
+        menu.exec_(gpos)
+
+    def on_paste_at(self, docx, docy):
+        """Paste the clipboard box centred at the given doc position."""
+        b = self._clipboard_box
+        if not b or not self._page():
+            return
+        dx = (docx - b["w"] / 2.0) - b["x"]
+        dy = (docy - b["h"] / 2.0) - b["y"]
+        self._place_box(b, dx, dy)
+        self._status(self._tr("pasted"))
 
     def _show_box_menu(self, gpos):
         if not self._sel:
