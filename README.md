@@ -68,8 +68,11 @@ just want to label images.
 
    The **Centre marker** checkbox shows a cross + dot at the middle of every
    marking (and a live one while you drag), so you can see exactly where the
-   centre lands. Every tool still exports as a normal YOLO bounding box, so the
-   dataset format never changes.
+   centre lands. The **Order path** checkbox draws the `1 → 2 → 3` reading-order
+   path (with arrows) between the boxes, so after **Auto order** you can check
+   the sequence at a glance and fix only the few steps it got wrong. Every tool
+   still exports as a normal YOLO bounding box, so the dataset format never
+   changes.
 
    **Undo / Redo:** made a mistake? **↶ Undo** (**Ctrl+Z**) steps back through
    adds, moves, resizes, deletes, relabels and ordering changes; **↷ Redo**

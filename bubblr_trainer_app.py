@@ -9,6 +9,7 @@ Run:  python bubblr_trainer_app.py     (needs Python 3 + PyQt5)
 """
 import copy
 import json
+import math
 import os
 import subprocess
 import sys
@@ -25,7 +26,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.4"
+VERSION = "3.5"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -77,6 +78,9 @@ LANG = {
         "wand_tol_tip": "Magic-wand colour tolerance (higher = grabs more).",
         "center_marker": "Centre marker",
         "center_marker_tip": "Show a cross + dot at the centre of every marking.",
+        "order_path": "Order path",
+        "order_path_tip": "Draw the 1->2->3 reading-order path between the boxes "
+                          "so you can check (and fix) the order at a glance.",
         "undo": "↶ Undo",
         "redo": "↷ Redo",
         "undo_tip": "Undo the last change (Ctrl+Z)",
@@ -239,6 +243,10 @@ LANG = {
         "wand_tol_tip": "Farbtoleranz des Zauberstabs (höher = erfasst mehr).",
         "center_marker": "Mittelpunkt",
         "center_marker_tip": "Kreuz + Punkt in der Mitte jeder Markierung anzeigen.",
+        "order_path": "Lesepfad",
+        "order_path_tip": "Den Lesepfad 1->2->3 zwischen den Boxen einzeichnen, "
+                          "damit man die Reihenfolge auf einen Blick prüfen (und "
+                          "korrigieren) kann.",
         "undo": "↶ Rückgängig",
         "redo": "↷ Wiederh.",
         "undo_tip": "Letzte Änderung rückgängig (Strg+Z)",
@@ -546,6 +554,7 @@ class BoxOverlay(QWidget):
         self._rubber = None       # rubber-band rectangle while view-mode drag
         self._tool = "rect"       # rect | ellipse | lasso | wand
         self._show_center = True  # draw a marker at each box's centre
+        self._show_order_path = False  # draw the 1->2->3 reading-order path
         self._wand_tol = 40       # magic-wand colour tolerance (0..255)
         self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -566,6 +575,10 @@ class BoxOverlay(QWidget):
 
     def set_center_marker(self, on):
         self._show_center = bool(on)
+        self.update()
+
+    def set_order_path(self, on):
+        self._show_order_path = bool(on)
         self.update()
 
     def set_wand_tolerance(self, value):
@@ -694,6 +707,8 @@ class BoxOverlay(QWidget):
                            (r.left(), cyp), (r.right(), cyp)]
                 for hx, hy in hs:
                     p.drawRect(QRectF(hx - 3, hy - 3, 6, 6))
+        if self._show_order_path:
+            self._draw_order_path(p, t, scale)
         # live preview of the shape being drawn
         rect = self._rect_of(self._drag) if self._drag else None
         if rect is not None:
@@ -754,6 +769,39 @@ class BoxOverlay(QWidget):
         p.setPen(QPen(QColor(255, 255, 255), 1))
         rad = 3.0 if big else 2.0
         p.drawEllipse(c, rad, rad)
+
+    def _draw_order_path(self, p, t, scale):
+        """Connect the boxes that have a reading order (1 -> 2 -> 3 …) with a
+        line and arrowheads, so the reading order is visible at a glance and
+        wrong steps are easy to spot after an auto-order."""
+        pts = []
+        for b in self._boxes:
+            o = b.get("order", 0)
+            if o:
+                cx = t.x() + (b["x"] + b["w"] / 2.0) * scale
+                cy = t.y() + (b["y"] + b["h"] / 2.0) * scale
+                pts.append((o, cx, cy))
+        if len(pts) < 2:
+            return
+        pts.sort(key=lambda z: z[0])
+        col = QColor(255, 205, 40, 230)
+        p.setPen(QPen(col, 2))
+        p.setBrush(Qt.NoBrush)
+        for (_o0, x0, y0), (_o1, x1, y1) in zip(pts, pts[1:]):
+            p.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+        # arrowhead at each segment's midpoint, pointing along the path
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(col))
+        for (_o0, x0, y0), (_o1, x1, y1) in zip(pts, pts[1:]):
+            mx, my = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            ang = math.atan2(y1 - y0, x1 - x0)
+            a1, a2 = ang + math.radians(148), ang - math.radians(148)
+            head = QPolygonF([
+                QPointF(mx + 8 * math.cos(ang), my + 8 * math.sin(ang)),
+                QPointF(mx + 8 * math.cos(a1), my + 8 * math.sin(a1)),
+                QPointF(mx + 8 * math.cos(a2), my + 8 * math.sin(a2)),
+            ])
+            p.drawPolygon(head)
 
     def _hit(self, pos):
         t = self._target()
@@ -1286,6 +1334,11 @@ class TrainerWindow(QMainWindow):
         self.center_chk.setToolTip(self._tr("center_marker_tip"))
         self.center_chk.toggled.connect(self.overlay.set_center_marker)
         shape_row.addWidget(self.center_chk)
+        self.path_chk = QCheckBox(self._tr("order_path"))
+        self.path_chk.setChecked(False)
+        self.path_chk.setToolTip(self._tr("order_path_tip"))
+        self.path_chk.toggled.connect(self.overlay.set_order_path)
+        shape_row.addWidget(self.path_chk)
         shape_row.addStretch(1)
         lay.addLayout(shape_row)
 
@@ -1913,6 +1966,8 @@ class TrainerWindow(QMainWindow):
         self.tol_spin.setToolTip(t("wand_tol_tip"))
         self.center_chk.setText(t("center_marker"))
         self.center_chk.setToolTip(t("center_marker_tip"))
+        self.path_chk.setText(t("order_path"))
+        self.path_chk.setToolTip(t("order_path_tip"))
         self.undo_btn.setText(t("undo"))
         self.undo_btn.setToolTip(t("undo_tip"))
         self.redo_btn.setText(t("redo"))
