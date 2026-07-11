@@ -19,13 +19,13 @@ from PyQt5.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-    QAbstractItemView, QInputDialog, QProgressBar)
+    QAbstractItemView, QInputDialog, QActionGroup)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.5"
+VERSION = "2.6"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -145,7 +145,8 @@ LANG = {
         "rank_empty": "No ranked pages were produced.",
         "rank_loaded": "Loaded the top {n} ranked page(s).",
         "m_file": "File", "m_edit": "Edit", "m_page": "Page",
-        "m_view": "View", "m_help": "Help",
+        "m_view": "View", "m_settings": "Settings", "m_help": "Help",
+        "mi_language": "Language",
         "mi_load": "Load images…", "mi_rank": "Rank && load…",
         "mi_open": "Open project…", "mi_save": "Save project…",
         "mi_folder": "Choose dataset folder…",
@@ -301,7 +302,8 @@ LANG = {
         "rank_empty": "Es wurden keine gerankten Seiten erzeugt.",
         "rank_loaded": "Top {n} gerankte Seite(n) geladen.",
         "m_file": "Datei", "m_edit": "Bearbeiten", "m_page": "Seite",
-        "m_view": "Ansicht", "m_help": "Hilfe",
+        "m_view": "Ansicht", "m_settings": "Einstellungen", "m_help": "Hilfe",
+        "mi_language": "Sprache",
         "mi_load": "Bilder laden…", "mi_rank": "Ranken && laden…",
         "mi_open": "Projekt öffnen…", "mi_save": "Projekt speichern…",
         "mi_folder": "Dataset-Ordner wählen…",
@@ -1032,19 +1034,6 @@ class TrainerWindow(QMainWindow):
         lay.setSpacing(6)
         root.setLayout(lay)
 
-        head = QHBoxLayout()
-        self.progress = QProgressBar()          # labelled pages / total
-        self.progress.setTextVisible(True)
-        self.progress.setFixedHeight(16)
-        head.addWidget(self.progress, 1)
-        self.lang_combo = QComboBox()
-        self.lang_combo.addItem("English", "en")
-        self.lang_combo.addItem("Deutsch", "de")
-        self.lang_combo.setCurrentIndex(0 if self._lang == "en" else 1)
-        self.lang_combo.currentIndexChanged.connect(self._on_lang)
-        head.addWidget(self.lang_combo)
-        lay.addLayout(head)
-
         top = QHBoxLayout()
         self.lbl_sort = QLabel(self._tr("sort_by"))
         top.addWidget(self.lbl_sort)
@@ -1380,7 +1369,6 @@ class TrainerWindow(QMainWindow):
                 ("mi_open", self.on_load_project, "Ctrl+O"),
                 ("mi_save", self.on_save_project, "Ctrl+S"),
                 None,
-                ("mi_folder", self.on_choose_folder, None),
                 ("mi_exp_page", lambda: self.on_export(False), "Ctrl+E"),
                 ("mi_exp_all", lambda: self.on_export(True), "Ctrl+Shift+E"),
                 None,
@@ -1415,6 +1403,10 @@ class TrainerWindow(QMainWindow):
                 ("mi_zoom_out", lambda: self.overlay.zoom_step(1 / 1.25), "Ctrl+-"),
                 ("mi_fit", lambda: self.overlay.fit(), None),
             ]),
+            ("m_settings", [
+                ("__lang__", None, None),        # Language submenu
+                ("mi_folder", self.on_choose_folder, None),
+            ]),
             ("m_help", [
                 ("mi_shortcuts", self._show_shortcuts, "F1"),
                 ("mi_about", self._show_about, None),
@@ -1429,6 +1421,9 @@ class TrainerWindow(QMainWindow):
                     menu.addSeparator()
                     continue
                 akey, fn, sc = item
+                if akey == "__lang__":
+                    self._build_language_menu(menu)
+                    continue
                 act = menu.addAction(self._tr(akey))
                 if isinstance(sc, (list, tuple)):
                     act.setShortcuts([QKeySequence(s) for s in sc])
@@ -1436,6 +1431,18 @@ class TrainerWindow(QMainWindow):
                     act.setShortcut(QKeySequence(sc))
                 act.triggered.connect(lambda _checked=False, f=fn: f())
                 self._menu_actions.append((act, akey))
+
+    def _build_language_menu(self, parent):
+        sub = parent.addMenu(self._tr("mi_language"))
+        self._menu_titles.append((sub, "mi_language"))
+        grp = QActionGroup(self)
+        grp.setExclusive(True)
+        for code, label in (("en", "English"), ("de", "Deutsch")):
+            act = sub.addAction(label)          # names are proper nouns (no i18n)
+            act.setCheckable(True)
+            act.setChecked(self._lang == code)
+            grp.addAction(act)
+            act.triggered.connect(lambda _c=False, cd=code: self._set_lang(cd))
 
     def _retranslate_menu(self):
         for menu, key in getattr(self, "_menu_titles", []):
@@ -1656,8 +1663,10 @@ class TrainerWindow(QMainWindow):
         except OSError:
             pass
 
-    def _on_lang(self, _i):
-        self._lang = self.lang_combo.currentData() or "en"
+    def _set_lang(self, code):
+        if code == self._lang:
+            return
+        self._lang = code
         self._save_settings()
         self._retranslate()
 
@@ -1740,9 +1749,6 @@ class TrainerWindow(QMainWindow):
         total = len(self._pages)
         self.lbl_counts.setText(self._tr("counts").format(
             b=b, s=s, p=total, done=done))
-        self.progress.setMaximum(max(1, total))
-        self.progress.setValue(done)
-        self.progress.setFormat(self._tr("prog").format(done=done, total=total))
         if pg:
             self.page_lbl.setText(self._tr("page").format(
                 i=self._cur + 1, n=len(self._pages), name=pg["name"]))
