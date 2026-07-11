@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.6"
+VERSION = "4.7"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -203,7 +203,10 @@ LANG = {
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
         "settings_display": "Display", "settings_tools": "Tools",
-        "settings_storage": "Storage location",
+        "settings_newbox": "New boxes", "settings_storage": "Storage location",
+        "settings_newbox_hint": "The class a freshly drawn box gets. You can "
+                                "still change any box later with the right-click "
+                                "menu or the B / S keys.",
         "settings_folder_title": "Dataset / export folder",
         "settings_folder_none": "(no folder chosen yet)",
         "settings_open": "Settings…",
@@ -397,7 +400,10 @@ LANG = {
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
         "settings_display": "Anzeige", "settings_tools": "Werkzeuge",
-        "settings_storage": "Speicherort",
+        "settings_newbox": "Neue Boxen", "settings_storage": "Speicherort",
+        "settings_newbox_hint": "Die Klasse, die eine neu gezeichnete Box "
+                                "bekommt. Jede Box lässt sich später per "
+                                "Rechtsklick-Menü oder mit den Tasten B / S ändern.",
         "settings_folder_title": "Dataset-/Export-Ordner",
         "settings_folder_none": "(noch kein Ordner gewählt)",
         "settings_open": "Einstellungen…",
@@ -1418,7 +1424,8 @@ class TrainerWindow(QMainWindow):
         self._class_filter = None                 # None | "bubble" | "sfx"
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
-        self._new_kind = "bubble"
+        _nk = cfg.get("new_kind", "bubble")
+        self._new_kind = _nk if _nk in ("bubble", "sfx") else "bubble"
         self._order_mode = False
         self._order_counter = 1
         self._undo = []           # snapshots of (page index, boxes, selection)
@@ -1641,7 +1648,7 @@ class TrainerWindow(QMainWindow):
         data = {"lang": self._lang, "folder": self._folder,
                 "ai_dir": self._ai_dir, "locked": self._locked,
                 "wand_tol": self._wand_tol, "auto_order_on": self._auto_order,
-                "rtl": self._rtl}
+                "rtl": self._rtl, "new_kind": self._new_kind}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -2010,6 +2017,35 @@ class TrainerWindow(QMainWindow):
         dv.addWidget(rb_de)
         dv.addStretch(1)
 
+        # -- New boxes page: default class for a freshly drawn box --
+        newp = QWidget()
+        nv = QVBoxLayout(newp)
+        newk_title = QLabel()
+        newk_title.setStyleSheet("font-weight: bold;")
+        nv.addWidget(newk_title)
+        grp_nk = QButtonGroup(dlg)
+        rb_bub = QRadioButton()
+        rb_sfx = QRadioButton()
+        grp_nk.addButton(rb_bub)
+        grp_nk.addButton(rb_sfx)
+        rb_bub.setChecked(self._new_kind != "sfx")
+        rb_sfx.setChecked(self._new_kind == "sfx")
+
+        def on_newk(kind, on):
+            if on and kind != self._new_kind:
+                self._new_kind = kind
+                self._save_settings()
+
+        rb_bub.toggled.connect(lambda on: on_newk("bubble", on))
+        rb_sfx.toggled.connect(lambda on: on_newk("sfx", on))
+        nv.addWidget(rb_bub)
+        nv.addWidget(rb_sfx)
+        newk_hint = QLabel()
+        newk_hint.setWordWrap(True)
+        newk_hint.setStyleSheet("color: gray;")
+        nv.addWidget(newk_hint)
+        nv.addStretch(1)
+
         # -- Tools page: magic-wand tolerance --
         toolsp = QWidget()
         tvv = QVBoxLayout(toolsp)
@@ -2074,6 +2110,7 @@ class TrainerWindow(QMainWindow):
         sv.addStretch(1)
 
         stack.addWidget(disp)
+        stack.addWidget(newp)
         stack.addWidget(toolsp)
         stack.addWidget(store)
         nav.currentRowChanged.connect(stack.setCurrentIndex)
@@ -2085,11 +2122,16 @@ class TrainerWindow(QMainWindow):
             nav.blockSignals(True)
             nav.clear()
             nav.addItem(tr("settings_display"))
+            nav.addItem(tr("settings_newbox"))
             nav.addItem(tr("settings_tools"))
             nav.addItem(tr("settings_storage"))
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
             lang_title.setText(tr("mi_language"))
+            newk_title.setText(tr("settings_newbox"))
+            rb_bub.setText(tr("bubble"))
+            rb_sfx.setText(tr("sfx"))
+            newk_hint.setText(tr("settings_newbox_hint"))
             wand_title.setText(tr("settings_tools"))
             wand_lbl.setText(tr("wand_tol"))
             wand_hint.setText(tr("wand_tol_tip"))

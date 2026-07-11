@@ -79,9 +79,9 @@ just want to label images.
 
    **Undo / Redo** (**Ctrl+Z** / **Ctrl+Y**, also in the Edit menu) step through
    adds, moves, resizes, deletes, relabels and ordering changes.
-3. Set the **class** per box: a new box starts as **Bubble**; **right-click →
-   SFX** (or press **B** / **S**) to change it. Colours: Bubble = red,
-   SFX = blue.
+3. Set the **class** per box: a new box gets the **default class** (pick it once
+   under *Settings → New boxes*, defaults to Bubble); **right-click → SFX** (or
+   press **B** / **S**) to change any box. Colours: Bubble = red, SFX = blue.
 4. *(optional)* **Set reading order** (button, top row) → click the bubbles in
    order (1, 2, 3 …), or **Auto order** (top row) to number them automatically.
    *Edit → Clear reading order* restarts. Manga right-to-left is set under
