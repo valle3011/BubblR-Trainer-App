@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.8"
+VERSION = "4.9"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1379,9 +1379,12 @@ def make_tool_icon(kind, size=24):
 
 
 class PageStrip(QListWidget):
-    """Thumbnail list whose icon size follows the panel size, so pages grow
-    when you enlarge the dock, and that flips between a row (top/bottom) and a
-    column (left/right) depending on which side it is docked on."""
+    """Thumbnail list that reflows with the panel. On a side dock it is a GRID:
+    thumbnails grow as you widen it, and once there is room they wrap to 2, then
+    3 … columns (instead of one ever-bigger column). On top/bottom it is a
+    single scrolling row whose height follows the dock."""
+
+    PREF = 140          # preferred thumbnail cell width -> when to add a column
 
     def __init__(self):
         super(PageStrip, self).__init__()
@@ -1398,10 +1401,18 @@ class PageStrip(QListWidget):
 
     def _resize_icons(self):
         vp = self.viewport().size()
-        if self._vertical:                       # column: width follows the dock
-            w = max(56, min(220, vp.width() - 16))
-            self.setIconSize(QSize(w, int(w * 1.3)))
-        else:                                    # row: height follows the dock
+        if self._vertical:                       # grid: 1 -> 2 -> 3 … columns
+            avail = max(60, vp.width() - 4)
+            # add a column each time the cells would otherwise pass ~1.5*PREF,
+            # so thumbnails grow a bit, then wrap, then grow again
+            n = max(1, int(avail / self.PREF + 0.5))
+            cellw = (avail - 2 * n) // n          # a little slack so n cells fit
+            iconw = max(60, cellw - 8)
+            iconh = int(iconw * 1.3)
+            self.setGridSize(QSize(cellw, iconh + 22))
+            self.setIconSize(QSize(iconw, iconh))
+        else:                                    # single row, height = the dock
+            self.setGridSize(QSize())            # no forced grid for the strip
             h = max(56, min(260, vp.height() - 16))
             self.setIconSize(QSize(int(h * 0.8), h))
 
@@ -1704,13 +1715,17 @@ class TrainerWindow(QMainWindow):
         vertical = area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea)
         s = self.page_strip
         if vertical:
-            s.setFlow(QListWidget.TopToBottom)
+            s.setFlow(QListWidget.LeftToRight)   # rows that wrap -> a grid
+            s.setWrapping(True)
             s.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            s.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            # always-on keeps the viewport width stable so the column count
+            # doesn't flip-flop when the scrollbar appears/disappears
+            s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
             s.setMinimumHeight(0)
             s.setMinimumWidth(72)
         else:
-            s.setFlow(QListWidget.LeftToRight)
+            s.setFlow(QListWidget.LeftToRight)   # one horizontal strip
+            s.setWrapping(False)
             s.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             s.setMinimumWidth(0)

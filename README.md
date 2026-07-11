@@ -127,9 +127,10 @@ buttons do, each item showing its shortcut.
   edge (**left, right, top or bottom**) or float them. When two panels share an
   edge they **tab together with the tabs on top**. Turn *View → Lock panels* on
   to freeze the layout so nothing moves by accident; off again to rearrange.
-  The **Pages** panel adapts automatically: a row of thumbnails on the
-  top/bottom, a column on the left/right, and the thumbnails **grow as you
-  enlarge the panel**. All positions are remembered between runs.
+  The **Pages** panel adapts automatically: a scrolling row of thumbnails on
+  the top/bottom, and a **grid on the left/right** that grows the thumbnails as
+  you widen it and then **reflows to 2, then 3 … columns** instead of one
+  ever-bigger column. All positions are remembered between runs.
 - A **page thumbnail strip** lets you jump to any page with a
   click. Each thumbnail shows its status: **✓** = exported to the dataset,
   **•** = has boxes but not exported yet, nothing = still empty (editing an
