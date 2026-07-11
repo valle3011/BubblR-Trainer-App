@@ -125,6 +125,9 @@ buttons do, each item showing its shortcut.
   quick way to snap a loose box to the balloon.
 - **Auto-recovery:** the session is auto-saved every minute; if the app closed
   unexpectedly, it offers to restore your unsaved work on the next start.
+- **Quit guard:** if any page still has boxes you haven't exported, quitting
+  asks for confirmation first (the counter and the • thumbnail markers show
+  which pages), so you don't lose labelling work by accident.
 - The window also remembers its size and position between sessions.
 
 **Save project… / Load project…** stores every page + its boxes (and order) as a

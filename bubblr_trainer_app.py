@@ -27,7 +27,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.9"
+VERSION = "4.0"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -101,6 +101,11 @@ LANG = {
                          "Close this page and discard them?",
         "confirm_close_all": "{p} page(s) hold {n} box(es) that are not "
                              "exported.\n\nClose all pages and discard them?",
+        "confirm_quit_title": "Quit BubblR Trainer",
+        "confirm_quit_unexported": "{n} page(s) have boxes that aren't exported "
+                                   "to the dataset yet.\n\nQuit anyway? The "
+                                   "unexported boxes will be lost unless you "
+                                   "export them or save a project first.",
         "closed": "Page closed.",
         "closed_all": "All pages closed.",
         "sc_title": "Create a shortcut?",
@@ -273,6 +278,12 @@ LANG = {
                          "Diese Seite schließen und verwerfen?",
         "confirm_close_all": "{p} Seite(n) mit {n} Box(en), die nicht exportiert "
                              "sind.\n\nAlle Seiten schließen und verwerfen?",
+        "confirm_quit_title": "BubblR Trainer beenden",
+        "confirm_quit_unexported": "{n} Seite(n) haben Boxen, die noch nicht ins "
+                                   "Dataset exportiert sind.\n\nTrotzdem beenden? "
+                                   "Die nicht exportierten Boxen gehen verloren, "
+                                   "wenn du sie nicht vorher exportierst oder ein "
+                                   "Projekt speicherst.",
         "closed": "Seite geschlossen.",
         "closed_all": "Alle Seiten geschlossen.",
         "sc_title": "Verknüpfung anlegen?",
@@ -1497,7 +1508,18 @@ class TrainerWindow(QMainWindow):
         except Exception:
             pass
 
+    def _unexported_count(self):
+        """Pages that have boxes but have not been exported into the dataset."""
+        return sum(1 for p in self._pages
+                   if p["boxes"] and not p.get("exported"))
+
     def closeEvent(self, event):
+        n = self._unexported_count()
+        if n and not self._confirm_discard(
+                self._tr("confirm_quit_unexported").format(n=n),
+                title=self._tr("confirm_quit_title")):
+            event.ignore()                   # let the user export/save first
+            return
         self._save_settings()                # remember window size/position
         try:                                 # clean exit -> no crash recovery
             os.remove(RECOVERY_FILE)
@@ -2275,9 +2297,9 @@ class TrainerWindow(QMainWindow):
         self._after_pages_removed()
         self._status(self._tr("closed_all"))
 
-    def _confirm_discard(self, msg):
+    def _confirm_discard(self, msg, title=None):
         return QMessageBox.question(
-            self, self._tr("confirm_title"), msg,
+            self, title or self._tr("confirm_title"), msg,
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
 
     def _after_pages_removed(self):
