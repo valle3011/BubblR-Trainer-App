@@ -78,6 +78,21 @@ just want to label images.
 5. Choose a **dataset folder** (once — can be a shared Drive folder).
 6. **Export this page** or **Export all pages**.
 
+### Keyboard shortcuts (press **F1** in the app for this list)
+
+| Key | Action |
+| --- | --- |
+| **B** / **S** | set the selected box to Bubble / SFX |
+| **Delete** / **Backspace** | delete the selected box |
+| **Arrow keys** | nudge the selected box (**Shift** = 10 px) |
+| **Esc** | deselect |
+| **[** / **]** | previous / next page |
+| **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) | undo / redo |
+| **Ctrl+W** | close the current page |
+| Mouse wheel / middle-drag | zoom / pan |
+
+The window also remembers its size and position between sessions.
+
 **Save project… / Load project…** stores every page + its boxes (and order) as a
 `.json` so you can pause and resume. (It references the image paths, so keep the
 images where they are.)

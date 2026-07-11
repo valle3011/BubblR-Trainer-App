@@ -23,7 +23,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
 
-VERSION = "1.4"
+VERSION = "1.5"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -35,7 +35,8 @@ LANG = {
         "title": "BubblR Trainer",
         "intro": ("Load page images, draw a box around every bubble and SFX, "
                   "label them, optionally set the reading order, then export. "
-                  "No AI here - this only makes the training data."),
+                  "No AI here - this only makes the training data.  "
+                  "Press F1 for keyboard shortcuts."),
         "load": "Load images…",
         "prev": "◀", "next": "▶",
         "fit": "Fit",
@@ -100,6 +101,16 @@ LANG = {
         "sc_skip": "Not now",
         "sc_done": "Shortcut created.",
         "sc_none": "No location selected.",
+        "sh_title": "Keyboard shortcuts",
+        "sh_text": ("B / S — set the selected box to Bubble / SFX\n"
+                    "Delete / Backspace — delete the selected box\n"
+                    "Arrow keys — nudge the selected box (Shift = 10 px)\n"
+                    "Esc — deselect\n"
+                    "[  /  ]  — previous / next page\n"
+                    "Ctrl+Z — undo     Ctrl+Y or Ctrl+Shift+Z — redo\n"
+                    "Ctrl+W — close the current page\n"
+                    "Mouse wheel — zoom     middle-drag — pan\n"
+                    "F1 — show this help"),
         "save": "Save project…", "load_proj": "Load project…",
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
@@ -124,7 +135,7 @@ LANG = {
         "intro": ("Seitenbilder laden, um jede Bubble und jeden SFX eine Box "
                   "ziehen, labeln, optional die Lesereihenfolge festlegen, dann "
                   "exportieren. Hier läuft keine KI – das erzeugt nur die "
-                  "Trainingsdaten."),
+                  "Trainingsdaten.  F1 zeigt die Tastenkürzel."),
         "load": "Bilder laden…",
         "prev": "◀", "next": "▶",
         "fit": "Einpassen",
@@ -189,6 +200,16 @@ LANG = {
         "sc_skip": "Nicht jetzt",
         "sc_done": "Verknüpfung angelegt.",
         "sc_none": "Kein Ort ausgewählt.",
+        "sh_title": "Tastenkürzel",
+        "sh_text": ("B / S — ausgewählte Box auf Bubble / SFX setzen\n"
+                    "Entf / Rücktaste — ausgewählte Box löschen\n"
+                    "Pfeiltasten — ausgewählte Box verschieben (Umschalt = 10 px)\n"
+                    "Esc — Auswahl aufheben\n"
+                    "[  /  ]  — vorige / nächste Seite\n"
+                    "Strg+Z — rückgängig     Strg+Y oder Umschalt+Strg+Z — wiederh.\n"
+                    "Strg+W — aktuelle Seite schließen\n"
+                    "Mausrad — Zoom     Mittel-Ziehen — verschieben\n"
+                    "F1 — diese Hilfe anzeigen"),
         "save": "Projekt speichern…", "load_proj": "Projekt laden…",
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
@@ -302,6 +323,7 @@ class BoxOverlay(QWidget):
         self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)   # so arrow keys nudge the box
 
     def set_edit_mode(self, on):
         self._edit = bool(on)
@@ -569,6 +591,7 @@ class BoxOverlay(QWidget):
         return x, y, w, h
 
     def mousePressEvent(self, event):
+        self.setFocus()                      # take keyboard focus for nudging
         if event.button() == Qt.MiddleButton:
             self._panning = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
@@ -586,6 +609,23 @@ class BoxOverlay(QWidget):
         idx = self._hit(event.pos())
         if idx >= 0:
             self.boxClicked.emit(idx)
+
+    def keyPressEvent(self, event):
+        # arrow keys nudge the selected box (Shift = 10 px); pan otherwise
+        k = event.key()
+        arrows = (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down)
+        if k in arrows and 0 <= self._current < len(self._boxes):
+            step = 10 if event.modifiers() & Qt.ShiftModifier else 1
+            b = self._boxes[self._current]
+            dx = -step if k == Qt.Key_Left else step if k == Qt.Key_Right else 0
+            dy = -step if k == Qt.Key_Up else step if k == Qt.Key_Down else 0
+            nx = max(0, min(b["x"] + dx, self._doc_w - b["w"]))
+            ny = max(0, min(b["y"] + dy, self._doc_h - b["h"]))
+            if nx != b["x"] or ny != b["y"]:
+                self.boxChanged.emit(self._current, nx, ny, b["w"], b["h"])
+            event.accept()
+            return
+        super(BoxOverlay, self).keyPressEvent(event)
 
     def _begin_edit(self, pos):
         dx, dy = self._to_doc(pos)
@@ -955,12 +995,30 @@ class TrainerWindow(QMainWindow):
         self.setCentralWidget(root)
         self.setWindowTitle(self._tr("title") + " v" + VERSION)
         self.resize(760, 720)
+        geo = cfg.get("geo")
+        if geo:                              # restore last window size/position
+            try:
+                self.restoreGeometry(bytes.fromhex(geo))
+            except Exception:                # noqa: BLE001
+                pass
 
-        # undo / redo keyboard shortcuts
+        # keyboard shortcuts for fast labelling
         QShortcut(QKeySequence.Undo, self, activated=self.undo)          # Ctrl+Z
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self.redo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
         QShortcut(QKeySequence("Ctrl+W"), self, activated=self.on_close_page)
+        QShortcut(QKeySequence("B"), self,
+                  activated=lambda: self._kbd_set_kind("bubble"))
+        QShortcut(QKeySequence("S"), self,
+                  activated=lambda: self._kbd_set_kind("sfx"))
+        QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self.on_delete)
+        QShortcut(QKeySequence(Qt.Key_Backspace), self, activated=self.on_delete)
+        QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self._deselect)
+        QShortcut(QKeySequence("["), self,
+                  activated=lambda: self._goto(self._cur - 1))
+        QShortcut(QKeySequence("]"), self,
+                  activated=lambda: self._goto(self._cur + 1))
+        QShortcut(QKeySequence("F1"), self, activated=self._show_shortcuts)
         self._update_undo_buttons()
 
         self._refresh_folder_label()
@@ -979,11 +1037,33 @@ class TrainerWindow(QMainWindow):
             return {}
 
     def _save_settings(self):
+        data = {"lang": self._lang, "folder": self._folder}
+        try:
+            data["geo"] = bytes(self.saveGeometry()).hex()
+        except Exception:                    # noqa: BLE001
+            pass
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as fh:
-                json.dump({"lang": self._lang, "folder": self._folder}, fh)
+                json.dump(data, fh)
         except Exception:
             pass
+
+    def closeEvent(self, event):
+        self._save_settings()                # remember window size/position
+        super(TrainerWindow, self).closeEvent(event)
+
+    # -- keyboard helpers --
+    def _kbd_set_kind(self, kind):
+        self._set_kind_buttons(kind)
+        self._set_kind(kind)                 # relabels the selected box + default
+
+    def _deselect(self):
+        if getattr(self, "_current", -1) != -1:
+            self._current = -1
+            self._refresh()
+
+    def _show_shortcuts(self):
+        QMessageBox.information(self, self._tr("sh_title"), self._tr("sh_text"))
 
     def _on_lang(self, _i):
         self._lang = self.lang_combo.currentData() or "en"
