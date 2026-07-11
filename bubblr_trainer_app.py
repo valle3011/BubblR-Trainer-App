@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.0"
+VERSION = "3.1"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -159,6 +159,7 @@ LANG = {
         "mi_copy": "Copy box", "mi_paste": "Paste box",
         "mi_dup": "Duplicate box", "mi_del": "Delete box",
         "mi_select_all": "Select all boxes", "mi_deselect": "Deselect",
+        "mi_goto_page": "Go to this page",
         "mi_bubble": "Mark as Bubble", "mi_sfx": "Mark as SFX",
         "mi_clear_order": "Clear reading order",
         "mi_prev": "Previous page", "mi_next": "Next page",
@@ -319,6 +320,7 @@ LANG = {
         "mi_copy": "Box kopieren", "mi_paste": "Box einfügen",
         "mi_dup": "Box duplizieren", "mi_del": "Box löschen",
         "mi_select_all": "Alle Boxen auswählen", "mi_deselect": "Auswahl aufheben",
+        "mi_goto_page": "Zu dieser Seite springen",
         "mi_bubble": "Als Bubble markieren", "mi_sfx": "Als SFX markieren",
         "mi_clear_order": "Lesereihenfolge löschen",
         "mi_prev": "Vorige Seite", "mi_next": "Nächste Seite",
@@ -1145,6 +1147,9 @@ class TrainerWindow(QMainWindow):
         self.page_strip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.page_strip.setToolTip(self._tr("strip_tip"))
         self.page_strip.currentRowChanged.connect(self._on_page_strip_row)
+        self.page_strip.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.page_strip.customContextMenuRequested.connect(
+            self._on_page_strip_context)
         lay.addWidget(self.page_strip)
 
         shape_row = QHBoxLayout()
@@ -1666,6 +1671,20 @@ class TrainerWindow(QMainWindow):
         if 0 <= row < len(self._pages) and row != self._cur:
             self._goto(row)
 
+    def _on_page_strip_context(self, pos):
+        it = self.page_strip.itemAt(pos)
+        if it is None:
+            return
+        idx = self.page_strip.row(it)
+        if not (0 <= idx < len(self._pages)):
+            return
+        t = self._tr
+        menu = QMenu(self)
+        menu.addAction(t("mi_goto_page"), lambda: self._goto(idx))
+        menu.addSeparator()
+        menu.addAction(t("close_page"), lambda: self._close_page_at(idx))
+        menu.exec_(self.page_strip.viewport().mapToGlobal(pos))
+
     # -- copy / paste / duplicate a box --
     def on_copy_box(self):
         pg = self._page()
@@ -1993,18 +2012,25 @@ class TrainerWindow(QMainWindow):
         self._status(self._tr("all_labelled"))
 
     # -- closing pages --
-    def on_close_page(self):
-        """Remove the current page from the session (does not touch files)."""
-        pg = self._page()
-        if not pg:
+    def _close_page_at(self, idx):
+        """Remove the page at idx from the session (does not touch files)."""
+        if not (0 <= idx < len(self._pages)):
             return
+        pg = self._pages[idx]
         if pg["boxes"] and not self._confirm_discard(
                 self._tr("confirm_close").format(n=len(pg["boxes"]),
                                                  name=pg["name"])):
             return
-        del self._pages[self._cur]
+        del self._pages[idx]
+        if self._cur > idx:
+            self._cur -= 1
         self._after_pages_removed()
         self._status(self._tr("closed"))
+
+    def on_close_page(self):
+        """Remove the current page from the session (does not touch files)."""
+        if self._page():
+            self._close_page_at(self._cur)
 
     def on_close_all(self):
         """Remove every loaded page from the session."""

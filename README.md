@@ -105,7 +105,8 @@ buttons do, each item showing its shortcut.
 | Mouse wheel / middle-drag | zoom / pan |
 
 - A **page thumbnail strip** under the image lets you jump to any page with a
-  click; a **✓** marks pages that already have boxes.
+  click; a **✓** marks pages that already have boxes. **Right-click a thumbnail**
+  to jump to that page or close it (without switching to it first).
 - A **Boxes** list on the right shows every box on the page — click one to
   select it (handy when boxes overlap), **Ctrl/Shift-click for several**, or
   **drag items to reorder them**, which sets the reading order (1, 2, 3 …)
