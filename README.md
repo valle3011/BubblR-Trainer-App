@@ -136,7 +136,9 @@ the same dataset:
 images/train/<page>_<id>.png   the page (full colour, full resolution)
 labels/train/<page>_<id>.txt   YOLO: "class cx cy w h", normalized 0..1
 order/<page>_<id>.json         boxes sorted by reading order (+ class)
-preview/<page>_<id>.png        the page with boxes drawn (to check by eye)
+preview/<page>_<id>.png        the page with boxes + reading-order numbers drawn
+                               (and the order path if "Order path" is on) to
+                               check by eye
 ```
 
 Classes: **bubble = 0**, **sfx = 1**.

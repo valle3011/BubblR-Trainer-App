@@ -26,7 +26,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.5"
+VERSION = "3.6"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -2503,16 +2503,53 @@ class TrainerWindow(QMainWindow):
     def _render_preview(self, pg):
         img = pg["img"].convertToFormat(QImage.Format_ARGB32)
         p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
         fnt = QFont()
         fnt.setBold(True)
-        fnt.setPixelSize(max(12, img.width() // 60))
+        fs = max(12, img.width() // 60)
+        fnt.setPixelSize(fs)
         p.setFont(fnt)
-        for b in pg["boxes"]:
+        lw = max(2, img.width() // 400)
+        boxes = pg["boxes"]
+        for b in boxes:
             color = QColor(*KIND_COLOR.get(b.get("kind", "bubble"),
                                            KIND_COLOR["bubble"]))
-            p.setPen(QPen(color, max(2, img.width() // 400)))
+            p.setPen(QPen(color, lw))
             p.setBrush(Qt.NoBrush)
             p.drawRect(QRectF(b["x"], b["y"], b["w"], b["h"]))
+            # reading-order number (or B/S class) badge, like the on-screen view
+            order = b.get("order", 0)
+            label = str(order) if order else ("B" if b.get("kind") != "sfx"
+                                              else "S")
+            bw = max(fs + 6, 6 + int(fs * 0.7) * len(label))
+            badge = QRectF(b["x"], b["y"], bw, fs + 6)
+            p.fillRect(badge, color)
+            p.setPen(QPen(QColor(255, 255, 255)))
+            p.drawText(badge, Qt.AlignCenter, label)
+        # reading-order path (mirrors the on-screen "Order path" toggle)
+        if getattr(self, "path_chk", None) is not None and self.path_chk.isChecked():
+            pts = sorted(((b["order"], b["x"] + b["w"] / 2.0,
+                           b["y"] + b["h"] / 2.0)
+                          for b in boxes if b.get("order")), key=lambda z: z[0])
+            if len(pts) >= 2:
+                col = QColor(255, 205, 40, 235)
+                p.setPen(QPen(col, lw))
+                p.setBrush(Qt.NoBrush)
+                for (_a, x0, y0), (_b, x1, y1) in zip(pts, pts[1:]):
+                    p.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+                ah = max(7, img.width() // 120)
+                p.setPen(Qt.NoPen)
+                p.setBrush(QBrush(col))
+                for (_a, x0, y0), (_b, x1, y1) in zip(pts, pts[1:]):
+                    mx, my = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+                    ang = math.atan2(y1 - y0, x1 - x0)
+                    a1, a2 = ang + math.radians(148), ang - math.radians(148)
+                    head = QPolygonF([
+                        QPointF(mx + ah * math.cos(ang), my + ah * math.sin(ang)),
+                        QPointF(mx + ah * math.cos(a1), my + ah * math.sin(a1)),
+                        QPointF(mx + ah * math.cos(a2), my + ah * math.sin(a2)),
+                    ])
+                    p.drawPolygon(head)
         p.end()
         return img
 
