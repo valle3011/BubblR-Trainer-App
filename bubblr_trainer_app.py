@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.4"
+VERSION = "2.5"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1033,7 +1033,10 @@ class TrainerWindow(QMainWindow):
         root.setLayout(lay)
 
         head = QHBoxLayout()
-        head.addStretch(1)
+        self.progress = QProgressBar()          # labelled pages / total
+        self.progress.setTextVisible(True)
+        self.progress.setFixedHeight(16)
+        head.addWidget(self.progress, 1)
         self.lang_combo = QComboBox()
         self.lang_combo.addItem("English", "en")
         self.lang_combo.addItem("Deutsch", "de")
@@ -1221,16 +1224,8 @@ class TrainerWindow(QMainWindow):
         lay.addWidget(self.lbl_relabel)
         self.lbl_counts = QLabel("")
         lay.addWidget(self.lbl_counts)
-        self.progress = QProgressBar()          # labelled pages / total
-        self.progress.setTextVisible(True)
-        self.progress.setFixedHeight(16)
-        lay.addWidget(self.progress)
 
         io_row = QHBoxLayout()
-        self.rank_load_btn = QPushButton(self._tr("rank_load"))
-        self.rank_load_btn.setToolTip(self._tr("rank_load_tip"))
-        self.rank_load_btn.clicked.connect(self.on_rank_load)
-        io_row.addWidget(self.rank_load_btn)
         io_row.addStretch(1)
         self.save_btn = QPushButton(self._tr("save"))
         self.save_btn.clicked.connect(self.on_save_project)
@@ -1674,8 +1669,6 @@ class TrainerWindow(QMainWindow):
         self.lbl_boxes.setText(t("boxes"))
         self.box_list.setToolTip(t("boxes_tip"))
         self.page_strip.setToolTip(t("strip_tip"))
-        self.rank_load_btn.setText(t("rank_load"))
-        self.rank_load_btn.setToolTip(t("rank_load_tip"))
         self.lbl_sort.setText(t("sort_by"))
         for i, _k in enumerate(("name", "unlabeled", "fewest", "most")):
             self.sort_combo.setItemText(i, t("sort_" + _k))
@@ -2158,12 +2151,14 @@ class TrainerWindow(QMainWindow):
         if not py:
             self._status(self._tr("rank_no_venv"), error=True)
             return
+        if getattr(self, "_ranking", False):     # a rank job is already running
+            return
         top, ok = QInputDialog.getInt(
             self, self._tr("rank_top_title"), self._tr("rank_top_q"), 30, 1, 500)
         if not ok:
             return
         self._rank_folder = folder
-        self.rank_load_btn.setEnabled(False)
+        self._ranking = True
         self._status(self._tr("rank_running"))
         self._rank_proc = QProcess(self)
         self._rank_proc.setWorkingDirectory(ai)
@@ -2180,7 +2175,7 @@ class TrainerWindow(QMainWindow):
             self._status(self._tr("rank_running") + "  " + txt[-1][:80])
 
     def _rank_finished(self, code, _status):
-        self.rank_load_btn.setEnabled(True)
+        self._ranking = False
         if code != 0:
             self._status(self._tr("rank_fail"), error=True)
             return
