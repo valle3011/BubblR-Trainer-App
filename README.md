@@ -7,10 +7,11 @@ just want to label images.
 
 ## Run it
 
-**Requires Python 3.** Then:
-
-- **Windows:** double-click **`run.bat`** (it installs PyQt5 the first time, then
-  starts the app).
+- **No-Python `.exe` (easiest):** run **`dist/BubblR-Trainer.exe`** — a single
+  standalone file, no Python or PyQt5 install needed. Build it yourself with
+  **`build_exe.bat`** (see Notes).
+- **Windows (with Python):** double-click **`run.bat`** — installs PyQt5 the
+  first time, then starts the app.
 - **Any OS / manually:**
   ```
   pip install PyQt5
@@ -18,8 +19,8 @@ just want to label images.
   ```
 
 > No Python yet? Install it from https://www.python.org/downloads/ and tick
-> "Add Python to PATH" during setup. (A packaged `.exe` with no Python needed can
-> be built with PyInstaller — see the note at the bottom.)
+> "Add Python to PATH" during setup — only needed for `run.bat` / manual run,
+> not for the `.exe`.
 
 ## How to label
 
@@ -93,5 +94,9 @@ Classes: **bubble = 0**, **sfx = 1**.
 
 - Settings (language, dataset folder) are stored in `~/.bubblr_trainer.json`.
 - Bilingual (English / Deutsch) — switch with the dropdown at the top-right.
-- **Make a no-Python `.exe`:** `pip install pyinstaller` then
-  `pyinstaller --onefile --windowed bubblr_trainer_app.py` → `dist/…exe`.
+- **Make a no-Python `.exe`:** double-click **`build_exe.bat`** (installs
+  PyInstaller if needed, then builds). Result: `dist/BubblR-Trainer.exe` — a
+  single ~36 MB file you can copy anywhere and run without Python. It starts
+  faster than the `run.bat` route because there's no interpreter/PyQt5 import.
+  The `build/`, `dist/` and `.spec` outputs are git-ignored (the exe isn't
+  committed — rebuild it locally).
