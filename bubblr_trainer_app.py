@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.3"
+VERSION = "4.4"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -64,10 +64,12 @@ LANG = {
         "sort_by": "Sort pages:",
         "sort_name": "by name",
         "sort_unlabeled": "unlabelled first",
+        "sort_unexported": "unexported first",
         "sort_fewest": "fewest boxes first",
         "sort_most": "most boxes first",
         "next_todo": "Next unlabelled",
         "all_labelled": "All pages have at least one box.",
+        "all_exported": "All labelled pages are exported.",
         "tool": "Tool:",
         "tool_rect": "▭ Rectangle",
         "tool_ellipse": "◯ Ellipse",
@@ -178,6 +180,7 @@ LANG = {
         "mi_clear_order": "Clear reading order",
         "mi_prev": "Previous page", "mi_next": "Next page",
         "mi_next_todo": "Next unlabelled",
+        "mi_next_unexported": "Next unexported",
         "mi_close": "Close page", "mi_close_all": "Close all pages",
         "mi_zoom_in": "Zoom in", "mi_zoom_out": "Zoom out",
         "mi_zoom_sel": "Zoom to selection", "mi_fit": "Fit to window",
@@ -247,10 +250,12 @@ LANG = {
         "sort_by": "Seiten sortieren:",
         "sort_name": "nach Name",
         "sort_unlabeled": "ungelabelte zuerst",
+        "sort_unexported": "nicht exportierte zuerst",
         "sort_fewest": "wenigste Boxen zuerst",
         "sort_most": "meiste Boxen zuerst",
         "next_todo": "Nächste ungelabelte",
         "all_labelled": "Alle Seiten haben mindestens eine Box.",
+        "all_exported": "Alle gelabelten Seiten sind exportiert.",
         "tool": "Werkzeug:",
         "tool_rect": "▭ Rechteck",
         "tool_ellipse": "◯ Ellipse",
@@ -363,6 +368,7 @@ LANG = {
         "mi_clear_order": "Lesereihenfolge löschen",
         "mi_prev": "Vorige Seite", "mi_next": "Nächste Seite",
         "mi_next_todo": "Nächste ungelabelte",
+        "mi_next_unexported": "Nächste nicht exportierte",
         "mi_close": "Seite schließen", "mi_close_all": "Alle Seiten schließen",
         "mi_zoom_in": "Vergrößern", "mi_zoom_out": "Verkleinern",
         "mi_zoom_sel": "Auf Auswahl zoomen", "mi_fit": "Einpassen",
@@ -1396,7 +1402,7 @@ class TrainerWindow(QMainWindow):
         self.lbl_sort = QLabel(self._tr("sort_by"))
         top.addWidget(self.lbl_sort)
         self.sort_combo = QComboBox()
-        for _k in ("name", "unlabeled", "fewest", "most"):
+        for _k in ("name", "unlabeled", "unexported", "fewest", "most"):
             self.sort_combo.addItem(self._tr("sort_" + _k), _k)
         self.sort_combo.currentIndexChanged.connect(self._sort_pages)
         top.addWidget(self.sort_combo)
@@ -1911,6 +1917,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_prev", lambda: self._goto(self._cur - 1), "["),
                 ("mi_next", lambda: self._goto(self._cur + 1), "]"),
                 ("mi_next_todo", self.on_next_todo, None),
+                ("mi_next_unexported", self.on_next_unexported, None),
                 None,
                 ("mi_close", self.on_close_page, "Ctrl+W"),
                 ("mi_close_all", self.on_close_all, None),
@@ -2328,7 +2335,8 @@ class TrainerWindow(QMainWindow):
         self.box_list.setToolTip(t("boxes_tip"))
         self.page_strip.setToolTip(t("strip_tip"))
         self.lbl_sort.setText(t("sort_by"))
-        for i, _k in enumerate(("name", "unlabeled", "fewest", "most")):
+        for i, _k in enumerate(("name", "unlabeled", "unexported",
+                                "fewest", "most")):
             self.sort_combo.setItemText(i, t("sort_" + _k))
         self.next_todo_btn.setText(t("next_todo"))
         for _k, _btn in self.tool_btns.items():
@@ -2508,6 +2516,13 @@ class TrainerWindow(QMainWindow):
 
         if key == "unlabeled":
             self._pages.sort(key=lambda p: (nboxes(p) > 0, p["name"].lower()))
+        elif key == "unexported":
+            # pages with boxes but not exported first, then empty, then exported
+            def rank(p):
+                if p["boxes"] and not p.get("exported"):
+                    return 0
+                return 1 if not p["boxes"] else 2
+            self._pages.sort(key=lambda p: (rank(p), p["name"].lower()))
         elif key == "fewest":
             self._pages.sort(key=lambda p: (nboxes(p), p["name"].lower()))
         elif key == "most":
@@ -2530,6 +2545,19 @@ class TrainerWindow(QMainWindow):
                 self._goto(idx)
                 return
         self._status(self._tr("all_labelled"))
+
+    def on_next_unexported(self):
+        """Jump to the next page with boxes that hasn't been exported yet."""
+        n = len(self._pages)
+        if n == 0:
+            return
+        for step in range(1, n + 1):
+            idx = (self._cur + step) % n
+            p = self._pages[idx]
+            if p["boxes"] and not p.get("exported"):
+                self._goto(idx)
+                return
+        self._status(self._tr("all_exported"))
 
     # -- closing pages --
     def _close_page_at(self, idx):

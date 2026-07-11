@@ -40,10 +40,12 @@ just want to label images.
      disk are never touched. You're asked to confirm if a page still has boxes
      you haven't exported.
    - **Rank the pages for labelling**: the **Sort pages** dropdown reorders the
-     loaded pages — *by name*, *unlabelled first*, *fewest boxes first*, or
-     *most boxes first* — so you always know what to do next. **Next unlabelled**
-     jumps to the next page that still has no boxes, and the counter shows how
-     many pages are already labelled (e.g. `12/20 labelled`).
+     loaded pages — *by name*, *unlabelled first*, *unexported first*, *fewest
+     boxes first*, or *most boxes first* — so you always know what to do next.
+     **Next unlabelled** jumps to the next page that still has no boxes and
+     **Page → Next unexported** jumps to the next labelled-but-not-yet-exported
+     page; the counter shows how many pages are labelled and exported (e.g.
+     `12/20 labelled, 8 exported`).
 2. Turn on **Draw / edit boxes**:
    - drag on empty space = new box,
    - drag inside a box = move,
