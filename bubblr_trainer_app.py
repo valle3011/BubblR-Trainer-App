@@ -26,7 +26,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.7"
+VERSION = "3.8"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -57,7 +57,8 @@ LANG = {
         "clear": "Clear all page",
         "kind": "New box is:", "bubble": "Bubble", "sfx": "SFX",
         "relabel": "(click a box first to relabel it)",
-        "counts": "This page - Bubbles: {b}   SFX: {s}   |   Pages: {done}/{p} labelled",
+        "counts": "This page - Bubbles: {b}   SFX: {s}   |   Pages: {done}/{p} "
+                  "labelled, {exp} exported",
         "sort_by": "Sort pages:",
         "sort_name": "by name",
         "sort_unlabeled": "unlabelled first",
@@ -223,7 +224,8 @@ LANG = {
         "clear": "Seite leeren",
         "kind": "Neue Box ist:", "bubble": "Bubble", "sfx": "SFX",
         "relabel": "(erst eine Box anklicken, um sie umzulabeln)",
-        "counts": "Diese Seite – Bubbles: {b}   SFX: {s}   |   Seiten: {done}/{p} gelabelt",
+        "counts": "Diese Seite – Bubbles: {b}   SFX: {s}   |   Seiten: {done}/{p} "
+                  "gelabelt, {exp} exportiert",
         "sort_by": "Seiten sortieren:",
         "sort_name": "nach Name",
         "sort_unlabeled": "ungelabelte zuerst",
@@ -2028,9 +2030,10 @@ class TrainerWindow(QMainWindow):
         b = sum(1 for x in boxes if x.get("kind") != "sfx")
         s = sum(1 for x in boxes if x.get("kind") == "sfx")
         done = sum(1 for p in self._pages if p["boxes"])
+        exp = sum(1 for p in self._pages if p.get("exported"))
         total = len(self._pages)
         self.lbl_counts.setText(self._tr("counts").format(
-            b=b, s=s, p=total, done=done))
+            b=b, s=s, p=total, done=done, exp=exp))
         if pg:
             self.page_lbl.setText(self._tr("page").format(
                 i=self._cur + 1, n=len(self._pages), name=pg["name"]))
@@ -2601,6 +2604,7 @@ class TrainerWindow(QMainWindow):
         except Exception as exc:
             self._status(self._tr("export_fail").format(msg=exc), error=True)
             return
+        self._refresh()                    # update the exported counter
         if hasattr(self, "page_strip"):
             self._rebuild_page_strip()     # show the fresh ✓ export markers
         if all_pages:
