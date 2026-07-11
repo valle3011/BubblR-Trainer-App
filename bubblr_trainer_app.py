@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.7"
+VERSION = "4.8"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1421,6 +1421,7 @@ class TrainerWindow(QMainWindow):
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._auto_order = bool(cfg.get("auto_order_on", False))
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
+        self._center = bool(cfg.get("center_marker", True))  # in Settings now
         self._class_filter = None                 # None | "bubble" | "sfx"
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
@@ -1550,11 +1551,12 @@ class TrainerWindow(QMainWindow):
         # wand tolerance is now set in the Settings window (keeps the Tools dock
         # small); apply the saved value to the overlay
         self.overlay.set_wand_tolerance(self._wand_tol)
+        self.overlay.set_center_marker(self._center)   # toggled in Settings now
         self.overlay.set_edit_mode(True)   # a tool is always ready to draw
 
         self._build_docks()
 
-        # view-option row: class filter, centre marker, order path, auto order
+        # compact view-option row: class filter, order path, auto order
         opt_row = QHBoxLayout()
         self.lbl_filter = QLabel(self._tr("show"))
         opt_row.addWidget(self.lbl_filter)
@@ -1564,11 +1566,6 @@ class TrainerWindow(QMainWindow):
         self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         opt_row.addWidget(self.filter_combo)
         opt_row.addSpacing(12)
-        self.center_chk = QCheckBox(self._tr("center_marker"))
-        self.center_chk.setChecked(True)
-        self.center_chk.setToolTip(self._tr("center_marker_tip"))
-        self.center_chk.toggled.connect(self.overlay.set_center_marker)
-        opt_row.addWidget(self.center_chk)
         self.path_chk = QCheckBox(self._tr("order_path"))
         self.path_chk.setChecked(False)
         self.path_chk.setToolTip(self._tr("order_path_tip"))
@@ -1584,25 +1581,19 @@ class TrainerWindow(QMainWindow):
 
         # Undo/redo, delete, clear, class and export are all reachable from the
         # Edit / File menus (and the right-click menu); no button clutter here.
-        self.lbl_relabel = QLabel(self._tr("relabel"))
-        self.lbl_relabel.setStyleSheet("color: gray;")
-        lay.addWidget(self.lbl_relabel)
-        self.lbl_counts = QLabel("")
-        lay.addWidget(self.lbl_counts)
-
-        self.lbl_intro = QLabel(self._tr("intro"))
-        self.lbl_intro.setWordWrap(True)
-        self.lbl_intro.setStyleSheet("color: gray; font-size: 11px;")
-        lay.addWidget(self.lbl_intro)
-        self.status = QLabel(self._tr("ready"))
-        self.status.setWordWrap(True)
-        lay.addWidget(self.status)
-        build = QLabel("BubblR Trainer v" + VERSION)
-        build.setStyleSheet("color: gray; font-size: 10px;")
-        build.setAlignment(Qt.AlignRight)
-        lay.addWidget(build)
-
         self.setCentralWidget(root)
+
+        # one thin status bar carries the message (left) + counts + version
+        # (right), instead of several stacked labels under the canvas
+        sb = self.statusBar()
+        self.status = QLabel(self._tr("ready"))
+        sb.addWidget(self.status, 1)
+        self.lbl_counts = QLabel("")
+        self.lbl_counts.setStyleSheet("color: #b0b3b8;")
+        sb.addPermanentWidget(self.lbl_counts)
+        ver = QLabel("v" + VERSION)
+        ver.setStyleSheet("color: gray;")
+        sb.addPermanentWidget(ver)
         self.setWindowTitle(self._tr("title") + " v" + VERSION)
         self.resize(760, 720)
         geo = cfg.get("geo")
@@ -1648,7 +1639,8 @@ class TrainerWindow(QMainWindow):
         data = {"lang": self._lang, "folder": self._folder,
                 "ai_dir": self._ai_dir, "locked": self._locked,
                 "wand_tol": self._wand_tol, "auto_order_on": self._auto_order,
-                "rtl": self._rtl, "new_kind": self._new_kind}
+                "rtl": self._rtl, "new_kind": self._new_kind,
+                "center_marker": self._center}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -2015,6 +2007,21 @@ class TrainerWindow(QMainWindow):
         rb_de.setChecked(self._lang == "de")
         dv.addWidget(rb_en)
         dv.addWidget(rb_de)
+        dv.addSpacing(14)
+        center_box = QCheckBox()
+        center_box.setChecked(self._center)
+
+        def on_center(on):
+            self._center = bool(on)
+            self.overlay.set_center_marker(on)
+            self._save_settings()
+
+        center_box.toggled.connect(on_center)
+        dv.addWidget(center_box)
+        center_hint = QLabel()
+        center_hint.setWordWrap(True)
+        center_hint.setStyleSheet("color: gray;")
+        dv.addWidget(center_hint)
         dv.addStretch(1)
 
         # -- New boxes page: default class for a freshly drawn box --
@@ -2128,6 +2135,8 @@ class TrainerWindow(QMainWindow):
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
             lang_title.setText(tr("mi_language"))
+            center_box.setText(tr("center_marker"))
+            center_hint.setText(tr("center_marker_tip"))
             newk_title.setText(tr("settings_newbox"))
             rb_bub.setText(tr("bubble"))
             rb_sfx.setText(tr("sfx"))
@@ -2409,7 +2418,6 @@ class TrainerWindow(QMainWindow):
         t = self._tr
         self.setWindowTitle(t("title") + " v" + VERSION)
         self._retranslate_menu()
-        self.lbl_intro.setText(t("intro"))
         self.tools_dock.setWindowTitle(t("dock_tools"))
         self.boxes_dock.setWindowTitle(t("dock_boxes"))
         self.thumbs_dock.setWindowTitle(t("dock_pages"))
@@ -2427,8 +2435,6 @@ class TrainerWindow(QMainWindow):
         self.auto_chk.setToolTip(t("auto_order_live_tip"))
         for _k, _btn in self.tool_btns.items():
             _btn.setToolTip(t("tool_" + _k + "_hint"))
-        self.center_chk.setText(t("center_marker"))
-        self.center_chk.setToolTip(t("center_marker_tip"))
         self.path_chk.setText(t("order_path"))
         self.path_chk.setToolTip(t("order_path_tip"))
         self.prev_btn.setText(t("prev"))
@@ -2442,7 +2448,6 @@ class TrainerWindow(QMainWindow):
         self.order_btn.setText(t("set_order"))
         self.auto_order_btn.setText(t("auto_order"))
         self.auto_order_btn.setToolTip(t("auto_order_tip"))
-        self.lbl_relabel.setText(t("relabel"))
         self._refresh()
 
     # -- helpers --
@@ -3245,7 +3250,11 @@ def apply_krita_dark(app):
         # the movable actions toolbar
         "QToolBar{background:#31363b;border-top:1px solid #4d4d4d;spacing:3px;"
         "padding:3px;}"
-        "QToolBar::separator{background:#4d4d4d;width:1px;margin:3px 5px;}")
+        "QToolBar::separator{background:#4d4d4d;width:1px;margin:3px 5px;}"
+        # thin bottom status bar
+        "QStatusBar{background:#31363b;color:#eff0f1;}"
+        "QStatusBar QLabel{color:#eff0f1;}"
+        "QStatusBar::item{border:0;}")
 
 
 def _resource(*parts):
