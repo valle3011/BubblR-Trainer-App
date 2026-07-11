@@ -96,7 +96,11 @@ Classes: **bubble = 0**, **sfx = 1**.
 - Bilingual (English / Deutsch) — switch with the dropdown at the top-right.
 - **Make a no-Python `.exe`:** double-click **`build_exe.bat`** (installs
   PyInstaller if needed, then builds). Result: `dist/BubblR-Trainer.exe` — a
-  single ~36 MB file you can copy anywhere and run without Python. It starts
-  faster than the `run.bat` route because there's no interpreter/PyQt5 import.
-  The `build/`, `dist/` and `.spec` outputs are git-ignored (the exe isn't
-  committed — rebuild it locally).
+  single ~36 MB file you can copy anywhere and run without Python or PyQt5.
+  - This is a *one-file* build: it unpacks to a temp folder on each launch, so
+    the very first start takes a moment. For the **fastest** start instead,
+    build a folder version — edit `build_exe.bat` to use `--onedir` (drop
+    `--onefile`); you then ship the whole `dist/BubblR-Trainer/` folder and its
+    `.exe` launches without unpacking.
+  - The `build/`, `dist/` and `.spec` outputs are git-ignored (the exe isn't
+    committed — rebuild it locally).
