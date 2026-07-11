@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.1"
+VERSION = "3.2"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -109,6 +109,7 @@ LANG = {
         "sh_text": ("B / S — set the selected box to Bubble / SFX\n"
                     "Delete / Backspace — delete the selected box\n"
                     "Arrow keys — nudge the selected box (Shift = 10 px)\n"
+                    "Alt + arrows — resize the selected box (Shift = 10 px)\n"
                     "Ctrl+C / Ctrl+V — copy / paste a box (also across pages)\n"
                     "Ctrl+D — duplicate the selected box\n"
                     "Ctrl+click (or the Boxes list) — select several boxes; "
@@ -270,6 +271,7 @@ LANG = {
         "sh_text": ("B / S — ausgewählte Box auf Bubble / SFX setzen\n"
                     "Entf / Rücktaste — ausgewählte Box löschen\n"
                     "Pfeiltasten — ausgewählte Box verschieben (Umschalt = 10 px)\n"
+                    "Alt + Pfeile — ausgewählte Box vergrößern/verkleinern (Umschalt = 10 px)\n"
                     "Strg+C / Strg+V — Box kopieren / einfügen (auch seitenübergr.)\n"
                     "Strg+D — ausgewählte Box duplizieren\n"
                     "Strg+Klick (oder Boxen-Liste) — mehrere Boxen wählen; "
@@ -824,8 +826,20 @@ class BoxOverlay(QWidget):
         k = event.key()
         arrows = (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down)
         if k in arrows and 0 <= self._current < len(self._boxes):
-            step = 10 if event.modifiers() & Qt.ShiftModifier else 1
+            mods = event.modifiers()
+            step = 10 if mods & Qt.ShiftModifier else 1
             b = self._boxes[self._current]
+            if mods & Qt.AltModifier:
+                # Alt + arrows resize: L/R change width, U/D change height
+                # (Right/Down grow, Left/Up shrink) from the top-left corner.
+                dw = -step if k == Qt.Key_Left else step if k == Qt.Key_Right else 0
+                dh = -step if k == Qt.Key_Up else step if k == Qt.Key_Down else 0
+                nw = max(4, min(b["w"] + dw, self._doc_w - b["x"]))
+                nh = max(4, min(b["h"] + dh, self._doc_h - b["y"]))
+                if nw != b["w"] or nh != b["h"]:
+                    self.boxChanged.emit(self._current, b["x"], b["y"], nw, nh)
+                event.accept()
+                return
             dx = -step if k == Qt.Key_Left else step if k == Qt.Key_Right else 0
             dy = -step if k == Qt.Key_Up else step if k == Qt.Key_Down else 0
             nx = max(0, min(b["x"] + dx, self._doc_w - b["w"]))

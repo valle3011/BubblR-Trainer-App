@@ -91,6 +91,7 @@ buttons do, each item showing its shortcut.
 | **B** / **S** | set the selected box to Bubble / SFX |
 | **Delete** / **Backspace** | delete the selected box |
 | **Arrow keys** | nudge the selected box (**Shift** = 10 px) |
+| **Alt + arrows** | resize the selected box (**Shift** = 10 px) |
 | **Ctrl+C** / **Ctrl+V** | copy / paste a box (also from one page onto another) |
 | **Ctrl+D** | duplicate the selected box |
 | **Ctrl+click** (or the Boxes list) | select several boxes — delete/relabel act on all |
