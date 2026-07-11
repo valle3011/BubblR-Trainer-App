@@ -16,9 +16,9 @@ import time
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
-    QMessageBox, QCheckBox, QSpinBox, QShortcut)
+    QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
-                         QPalette, QPolygonF, QKeySequence, QIcon)
+                         QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
 
 VERSION = "1.4"
@@ -1554,9 +1554,24 @@ def main():
     app = QApplication(sys.argv)
     apply_krita_dark(app)
     app.setWindowIcon(app_icon())           # taskbar / window / alt-tab icon
+
+    # Building the first widget triggers Qt's Windows font-database load, which
+    # is slow on machines with a huge font collection (nothing the app can skip
+    # — it's the OS font count). Show an instant splash first so startup does
+    # not look frozen. The splash text is baked into the image, so drawing it
+    # needs no font metrics and it appears immediately.
+    splash = None
+    sp = _resource("assets", "splash.png")
+    if os.path.exists(sp):
+        splash = QSplashScreen(QPixmap(sp))
+        splash.show()
+        app.processEvents()
+
     win = TrainerWindow()
     win.setWindowIcon(app_icon())
     win.show()
+    if splash is not None:
+        splash.finish(win)
     # image paths passed on the command line open straight away as pages
     # (used by "Open in BubblR Trainer" in the BubblR AI ranking tool)
     args = [a for a in app.arguments()[1:]

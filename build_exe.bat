@@ -25,6 +25,7 @@ python -m PyInstaller --onedir --windowed --name "BubblR-Trainer" --noconfirm --
   --icon "assets/icon.ico" ^
   --add-data "assets/icon.ico;assets" ^
   --add-data "assets/icon.png;assets" ^
+  --add-data "assets/splash.png;assets" ^
   bubblr_trainer_app.py
 if errorlevel 1 (
   echo [FEHLER] Build fehlgeschlagen.
