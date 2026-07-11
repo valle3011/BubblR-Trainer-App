@@ -19,13 +19,13 @@ from PyQt5.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-    QAbstractItemView, QInputDialog)
+    QAbstractItemView, QInputDialog, QProgressBar)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
-                          QSize, QProcess)
+                          QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.2"
+VERSION = "2.3"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -111,6 +111,9 @@ LANG = {
                     "Arrow keys — nudge the selected box (Shift = 10 px)\n"
                     "Ctrl+C / Ctrl+V — copy / paste a box (also across pages)\n"
                     "Ctrl+D — duplicate the selected box\n"
+                    "Ctrl+click (or the Boxes list) — select several boxes; "
+                    "delete/relabel act on all\n"
+                    "F — fit the selected box tightly onto the bubble\n"
                     "Esc — deselect\n"
                     "[  /  ]  — previous / next page\n"
                     "Ctrl+Z — undo     Ctrl+Y or Ctrl+Shift+Z — redo\n"
@@ -121,6 +124,10 @@ LANG = {
         "boxes_tip": "All boxes on this page — click to select, "
                      "drag to reorder (sets the reading order).",
         "strip_tip": "Page thumbnails — click to jump. ✓ = already has boxes.",
+        "prog": "{done} / {total} pages labelled",
+        "fit_box": "Fit box to bubble",
+        "fit_done": "Box fitted to the bubble.",
+        "fit_fail": "Couldn't detect a bubble to fit — leave the box as is.",
         "rank_load": "🎯 Rank & load…",
         "rank_load_tip": "Rank a folder of pages with the BubblR AI tool (if "
                          "installed), then load the top pages to label first.",
@@ -259,6 +266,9 @@ LANG = {
                     "Pfeiltasten — ausgewählte Box verschieben (Umschalt = 10 px)\n"
                     "Strg+C / Strg+V — Box kopieren / einfügen (auch seitenübergr.)\n"
                     "Strg+D — ausgewählte Box duplizieren\n"
+                    "Strg+Klick (oder Boxen-Liste) — mehrere Boxen wählen; "
+                    "Löschen/Umlabeln gilt für alle\n"
+                    "F — ausgewählte Box eng an die Blase anpassen\n"
                     "Esc — Auswahl aufheben\n"
                     "[  /  ]  — vorige / nächste Seite\n"
                     "Strg+Z — rückgängig     Strg+Y oder Umschalt+Strg+Z — wiederh.\n"
@@ -269,6 +279,10 @@ LANG = {
         "boxes_tip": "Alle Boxen dieser Seite — anklicken zum Auswählen, "
                      "ziehen zum Umsortieren (setzt die Lesereihenfolge).",
         "strip_tip": "Seiten-Miniaturen — anklicken zum Springen. ✓ = hat Boxen.",
+        "prog": "{done} / {total} Seiten gelabelt",
+        "fit_box": "Box an Blase anpassen",
+        "fit_done": "Box an die Blase angepasst.",
+        "fit_fail": "Keine Blase zum Anpassen erkannt — Box bleibt unverändert.",
         "rank_load": "🎯 Ranken & laden…",
         "rank_load_tip": "Einen Ordner mit Seiten über das BubblR-AI-Tool ranken "
                          "(falls installiert) und die Top-Seiten zum Labeln laden.",
@@ -417,6 +431,7 @@ class BoxOverlay(QWidget):
         self._doc_h = 1
         self._boxes = []
         self._current = -1
+        self._selected = set()
         self._edit = False
         self._drag = None
         self._zoom = 1.0          # 1.0 = fit to the widget
@@ -456,9 +471,10 @@ class BoxOverlay(QWidget):
         self._doc_h = max(1, doc_h)
         self.fit()                # a new page starts fitted
 
-    def set_boxes(self, boxes, current=-1):
+    def set_boxes(self, boxes, current=-1, selected=None):
         self._boxes = boxes
         self._current = current
+        self._selected = set(selected) if selected else set()
         self.update()
 
     def _base_scale(self):
@@ -532,12 +548,13 @@ class BoxOverlay(QWidget):
                        b["w"] * scale, b["h"] * scale)
             color = QColor(*KIND_COLOR.get(b.get("kind", "bubble"),
                                            KIND_COLOR["bubble"]))
-            p.setPen(QPen(color, 3 if k == self._current else 2))
+            sel = (k == self._current) or (k in self._selected)
+            p.setPen(QPen(color, 3 if sel else 2))
             p.setBrush(Qt.NoBrush)
             self._draw_shape(p, r, b.get("shape", "rect"),
                              b.get("points"), t, scale)
             if self._show_center:
-                self._draw_center(p, r.center(), color, big=(k == self._current))
+                self._draw_center(p, r.center(), color, big=sel)
             order = b.get("order", 0)
             label = str(order) if order else ("B" if b.get("kind") != "sfx" else "S")
             badge = QRectF(r.x(), r.y(), max(18, 8 + 8 * len(label)), 16)
@@ -916,6 +933,51 @@ class BoxOverlay(QWidget):
         return (float(minx), float(miny),
                 float(maxx - minx + 1), float(maxy - miny + 1))
 
+    def _fit_box_bounds(self, b):
+        """Tighten box `b` to the bubble inside it: find a bright seed near the
+        box centre, flood-fill it, and return the bbox — but only if it stays
+        within the original box (so a leak through a broken outline is ignored).
+        Returns a bbox tuple or None."""
+        img = self._img
+        if img is None or img.isNull():
+            return None
+        conv = img.convertToFormat(QImage.Format_RGB32)
+        bpl = conv.bytesPerLine()
+        ptr = conv.bits()
+        ptr.setsize(bpl * conv.height())
+        data = bytes(ptr)
+        w, h = img.width(), img.height()
+        bx0 = max(0, int(b["x"]))
+        by0 = max(0, int(b["y"]))
+        bx1 = min(w - 1, int(b["x"] + b["w"]))
+        by1 = min(h - 1, int(b["y"] + b["h"]))
+        if bx1 - bx0 < 4 or by1 - by0 < 4:
+            return None
+        cx, cy = (bx0 + bx1) // 2, (by0 + by1) // 2
+        step = max(1, int(((bx1 - bx0) * (by1 - by0) / 4000.0) ** 0.5))
+        seed, best = None, None
+        for y in range(by0, by1 + 1, step):
+            row = y * bpl
+            for x in range(bx0, bx1 + 1, step):
+                o = row + x * 4
+                lum = data[o + 2] * 0.30 + data[o + 1] * 0.59 + data[o] * 0.11
+                if lum >= 200:                       # bright = bubble interior
+                    d = (x - cx) ** 2 + (y - cy) ** 2
+                    if best is None or d < best:
+                        best, seed = d, (x, y)
+        if seed is None:
+            return None
+        bb = self._magic_wand(seed[0], seed[1])
+        if not bb:
+            return None
+        fx, fy, fw, fh = bb
+        pad = 6                                       # tolerate the 2px wand pad
+        if (fx < b["x"] - pad or fy < b["y"] - pad
+                or fx + fw > b["x"] + b["w"] + pad
+                or fy + fh > b["y"] + b["h"] + pad):
+            return None                               # leaked out of the box
+        return bb
+
 
 # ---------------------------------------------------------------------------
 # Main window
@@ -936,6 +998,7 @@ class TrainerWindow(QMainWindow):
         self._undo = []           # snapshots of (page index, boxes, selection)
         self._redo = []
         self._clipboard_box = None  # copied box for paste / duplicate
+        self._sel = set()           # selected box indices (multi-select)
 
         root = QWidget()
         lay = QVBoxLayout()
@@ -1012,8 +1075,8 @@ class TrainerWindow(QMainWindow):
         self.box_list.setFixedWidth(150)
         self.box_list.setToolTip(self._tr("boxes_tip"))
         self.box_list.setDragDropMode(QAbstractItemView.InternalMove)
-        self.box_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.box_list.currentRowChanged.connect(self._on_box_list_row)
+        self.box_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.box_list.itemSelectionChanged.connect(self._on_box_list_selection)
         self.box_list.model().rowsMoved.connect(self._on_boxes_reordered)
         box_col.addWidget(self.box_list, 1)
         mid.addLayout(box_col)
@@ -1131,6 +1194,10 @@ class TrainerWindow(QMainWindow):
         lay.addWidget(self.lbl_relabel)
         self.lbl_counts = QLabel("")
         lay.addWidget(self.lbl_counts)
+        self.progress = QProgressBar()          # labelled pages / total
+        self.progress.setTextVisible(True)
+        self.progress.setFixedHeight(16)
+        lay.addWidget(self.progress)
 
         io_row = QHBoxLayout()
         self.rank_load_btn = QPushButton(self._tr("rank_load"))
@@ -1238,8 +1305,9 @@ class TrainerWindow(QMainWindow):
         self._set_kind(kind)                 # relabels the selected box + default
 
     def _deselect(self):
-        if getattr(self, "_current", -1) != -1:
+        if self._current != -1 or self._sel:
             self._current = -1
+            self._sel = set()
             self._refresh()
 
     def _show_shortcuts(self):
@@ -1276,6 +1344,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_paste", self.on_paste_box, "Ctrl+V"),
                 ("mi_dup", self.on_duplicate_box, "Ctrl+D"),
                 ("mi_del", self.on_delete, ["Del", "Backspace"]),
+                ("fit_box", self.on_fit_box, "F"),
                 None,
                 ("mi_bubble", lambda: self._kbd_set_kind("bubble"), "B"),
                 ("mi_sfx", lambda: self._kbd_set_kind("sfx"), "S"),
@@ -1340,15 +1409,30 @@ class TrainerWindow(QMainWindow):
             it.setData(Qt.UserRole, i)        # original box index, for reordering
             lw.addItem(it)
         cur = getattr(self, "_current", -1)
-        lw.setCurrentRow(cur if 0 <= cur < lw.count() else -1)
+        lw.clearSelection()
+        for i in self._sel:                  # reflect the multi-selection
+            if 0 <= i < lw.count():
+                lw.item(i).setSelected(True)
+        if 0 <= cur < lw.count():
+            lw.setCurrentRow(cur, QItemSelectionModel.NoUpdate)
         lw.blockSignals(False)
         self._rebuilding_list = False
 
-    def _on_box_list_row(self, row):
+    def _on_box_list_selection(self):
+        if getattr(self, "_rebuilding_list", False):
+            return
         pg = self._page()
-        if pg and 0 <= row < len(pg["boxes"]) and row != self._current:
-            self._current = row
-            self._refresh()
+        rows = sorted(self.box_list.row(it)
+                      for it in self.box_list.selectedItems())
+        self._sel = {r for r in rows if pg and 0 <= r < len(pg["boxes"])}
+        cr = self.box_list.currentRow()
+        self._current = cr if cr in self._sel else (max(self._sel)
+                                                    if self._sel else -1)
+        if pg and 0 <= self._current < len(pg["boxes"]):
+            k = pg["boxes"][self._current].get("kind", "bubble")
+            self._set_kind_buttons(k)
+            self._new_kind = k
+        self._refresh()
 
     def _on_boxes_reordered(self, *_args):
         """A drag in the box list reorders the boxes and (re)numbers the reading
@@ -1441,6 +1525,24 @@ class TrainerWindow(QMainWindow):
         if pg and 0 <= cur < len(pg["boxes"]):
             self._place_box(pg["boxes"][cur], 15, 15)
             self._status(self._tr("duplicated"))
+
+    def on_fit_box(self):
+        """Tighten the selected box onto the bubble inside it (flood-fill)."""
+        pg = self._page()
+        cur = getattr(self, "_current", -1)
+        if not pg or not (0 <= cur < len(pg["boxes"])):
+            return
+        bb = self.overlay._fit_box_bounds(pg["boxes"][cur])
+        if not bb or bb[2] < 4 or bb[3] < 4:
+            self._status(self._tr("fit_fail"))
+            return
+        self._push_undo()
+        b = pg["boxes"][cur]
+        b["x"], b["y"] = int(bb[0]), int(bb[1])
+        b["w"], b["h"] = int(bb[2]), int(bb[3])
+        b.pop("points", None)                # tightened to a plain box
+        self._refresh()
+        self._status(self._tr("fit_done"))
 
     def _place_box(self, box, dx, dy):
         pg = self._page()
@@ -1574,12 +1676,24 @@ class TrainerWindow(QMainWindow):
     def _refresh(self):
         pg = self._page()
         boxes = pg["boxes"] if pg else []
-        self.overlay.set_boxes(boxes, getattr(self, "_current", -1))
+        n = len(boxes)
+        cur = getattr(self, "_current", -1)
+        # reconcile selection: drop invalid; single-select ops collapse it
+        self._sel = {i for i in self._sel if 0 <= i < n}
+        if cur < 0:
+            self._sel = set()
+        elif cur not in self._sel:
+            self._sel = {cur}
+        self.overlay.set_boxes(boxes, cur, self._sel)
         b = sum(1 for x in boxes if x.get("kind") != "sfx")
         s = sum(1 for x in boxes if x.get("kind") == "sfx")
         done = sum(1 for p in self._pages if p["boxes"])
+        total = len(self._pages)
         self.lbl_counts.setText(self._tr("counts").format(
-            b=b, s=s, p=len(self._pages), done=done))
+            b=b, s=s, p=total, done=done))
+        self.progress.setMaximum(max(1, total))
+        self.progress.setValue(done)
+        self.progress.setFormat(self._tr("prog").format(done=done, total=total))
         if pg:
             self.page_lbl.setText(self._tr("page").format(
                 i=self._cur + 1, n=len(self._pages), name=pg["name"]))
@@ -1596,12 +1710,16 @@ class TrainerWindow(QMainWindow):
 
     def _set_kind(self, kind):
         self._new_kind = kind
-        cur = getattr(self, "_current", -1)
         pg = self._page()
-        if pg and 0 <= cur < len(pg["boxes"]) and \
-                pg["boxes"][cur].get("kind") != kind:
+        if not pg:
+            return
+        changed = [i for i in self._sel
+                   if 0 <= i < len(pg["boxes"])
+                   and pg["boxes"][i].get("kind") != kind]
+        if changed:                          # relabel all selected boxes
             self._push_undo()
-            pg["boxes"][cur]["kind"] = kind
+            for i in changed:
+                pg["boxes"][i]["kind"] = kind
             self._refresh()
 
     def _set_kind_buttons(self, kind):
@@ -1808,16 +1926,27 @@ class TrainerWindow(QMainWindow):
         pg = self._page()
         if not pg or not (0 <= idx < len(pg["boxes"])):
             return
-        self._current = idx
         if self._order_mode:
+            self._current = idx
             self._push_undo()
             pg["boxes"][idx]["order"] = self._order_counter
             self._order_counter += 1
             self._refresh()
             return
-        kind = pg["boxes"][idx].get("kind", "bubble")
-        self._set_kind_buttons(kind)
-        self._new_kind = kind
+        if QApplication.keyboardModifiers() & Qt.ControlModifier:
+            if idx in self._sel:             # Ctrl+click toggles multi-selection
+                self._sel.discard(idx)
+            else:
+                self._sel.add(idx)
+            self._current = idx if idx in self._sel else (
+                max(self._sel) if self._sel else -1)
+        else:
+            self._current = idx
+            self._sel = {idx}
+        if 0 <= self._current < len(pg["boxes"]):
+            kind = pg["boxes"][self._current].get("kind", "bubble")
+            self._set_kind_buttons(kind)
+            self._new_kind = kind
         self._refresh()
 
     def _on_edit_toggle(self, on):
@@ -1868,12 +1997,18 @@ class TrainerWindow(QMainWindow):
 
     def on_delete(self):
         pg = self._page()
-        cur = getattr(self, "_current", -1)
-        if pg and 0 <= cur < len(pg["boxes"]):
-            self._push_undo()
-            del pg["boxes"][cur]
-            self._current = min(cur, len(pg["boxes"]) - 1)
-            self._refresh()
+        if not pg:
+            return
+        targets = sorted((i for i in self._sel if 0 <= i < len(pg["boxes"])),
+                         reverse=True)
+        if not targets:
+            return
+        self._push_undo()
+        for i in targets:                    # delete all selected boxes
+            del pg["boxes"][i]
+        self._current = -1
+        self._sel = set()
+        self._refresh()
 
     def on_clear(self):
         pg = self._page()
@@ -2228,7 +2363,11 @@ def apply_krita_dark(app):
         "QMenu::separator{height:1px;background:#4d4d4d;margin:4px 6px;}"
         # list widgets (Boxes list + page thumbnail strip)
         "QListWidget{background:#232629;color:#eff0f1;border:1px solid #4d4d4d;}"
-        "QListWidget::item:selected{background:#2f6f9f;color:#ffffff;}")
+        "QListWidget::item:selected{background:#2f6f9f;color:#ffffff;}"
+        # labelling progress bar
+        "QProgressBar{background:#232629;border:1px solid #4d4d4d;"
+        "border-radius:3px;text-align:center;color:#eff0f1;}"
+        "QProgressBar::chunk{background:#3daee9;border-radius:2px;}")
 
 
 def _resource(*parts):

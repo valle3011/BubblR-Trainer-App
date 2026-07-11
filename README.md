@@ -90,6 +90,8 @@ buttons do, each item showing its shortcut.
 | **Arrow keys** | nudge the selected box (**Shift** = 10 px) |
 | **Ctrl+C** / **Ctrl+V** | copy / paste a box (also from one page onto another) |
 | **Ctrl+D** | duplicate the selected box |
+| **Ctrl+click** (or the Boxes list) | select several boxes — delete/relabel act on all |
+| **F** | fit the selected box tightly onto the bubble |
 | **Esc** | deselect |
 | **[** / **]** | previous / next page |
 | **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) | undo / redo |
@@ -99,8 +101,13 @@ buttons do, each item showing its shortcut.
 - A **page thumbnail strip** under the image lets you jump to any page with a
   click; a **✓** marks pages that already have boxes.
 - A **Boxes** list on the right shows every box on the page — click one to
-  select it (handy when boxes overlap), or **drag items to reorder them**, which
-  sets the reading order (1, 2, 3 …) top-to-bottom.
+  select it (handy when boxes overlap), **Ctrl/Shift-click for several**, or
+  **drag items to reorder them**, which sets the reading order (1, 2, 3 …)
+  top-to-bottom. Delete/relabel then act on the whole selection.
+- A **progress bar** shows how many pages already have boxes (`12 / 40 pages
+  labelled`).
+- **F** tightens the selected box onto the bubble inside it (flood-fill) — a
+  quick way to snap a loose box to the balloon.
 - **Auto-recovery:** the session is auto-saved every minute; if the app closed
   unexpectedly, it offers to restore your unsaved work on the next start.
 - The window also remembers its size and position between sessions.
