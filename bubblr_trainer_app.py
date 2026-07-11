@@ -18,17 +18,19 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
-    QDialog, QDialogButtonBox)
+    QDialog, QDialogButtonBox, QListWidget, QListWidgetItem)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer
 
-VERSION = "1.5"
+VERSION = "1.6"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_trainer_shortcut_asked")
+RECOVERY_FILE = os.path.join(os.path.expanduser("~"),
+                             ".bubblr_trainer_recovery.json")
 
 LANG = {
     "en": {
@@ -105,12 +107,23 @@ LANG = {
         "sh_text": ("B / S — set the selected box to Bubble / SFX\n"
                     "Delete / Backspace — delete the selected box\n"
                     "Arrow keys — nudge the selected box (Shift = 10 px)\n"
+                    "Ctrl+C / Ctrl+V — copy / paste a box (also across pages)\n"
+                    "Ctrl+D — duplicate the selected box\n"
                     "Esc — deselect\n"
                     "[  /  ]  — previous / next page\n"
                     "Ctrl+Z — undo     Ctrl+Y or Ctrl+Shift+Z — redo\n"
                     "Ctrl+W — close the current page\n"
                     "Mouse wheel — zoom     middle-drag — pan\n"
                     "F1 — show this help"),
+        "boxes": "Boxes",
+        "boxes_tip": "All boxes on this page — click to select.",
+        "copied": "Box copied.",
+        "pasted": "Box pasted.",
+        "duplicated": "Box duplicated.",
+        "rec_title": "Recover session?",
+        "rec_msg": "The trainer didn't close normally last time. Restore your "
+                   "unsaved session ({n} page(s))?",
+        "rec_done": "Recovered {n} page(s).",
         "save": "Save project…", "load_proj": "Load project…",
         "folder_none": "Dataset folder: (none chosen)",
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
@@ -204,12 +217,23 @@ LANG = {
         "sh_text": ("B / S — ausgewählte Box auf Bubble / SFX setzen\n"
                     "Entf / Rücktaste — ausgewählte Box löschen\n"
                     "Pfeiltasten — ausgewählte Box verschieben (Umschalt = 10 px)\n"
+                    "Strg+C / Strg+V — Box kopieren / einfügen (auch seitenübergr.)\n"
+                    "Strg+D — ausgewählte Box duplizieren\n"
                     "Esc — Auswahl aufheben\n"
                     "[  /  ]  — vorige / nächste Seite\n"
                     "Strg+Z — rückgängig     Strg+Y oder Umschalt+Strg+Z — wiederh.\n"
                     "Strg+W — aktuelle Seite schließen\n"
                     "Mausrad — Zoom     Mittel-Ziehen — verschieben\n"
                     "F1 — diese Hilfe anzeigen"),
+        "boxes": "Boxen",
+        "boxes_tip": "Alle Boxen dieser Seite — zum Auswählen anklicken.",
+        "copied": "Box kopiert.",
+        "pasted": "Box eingefügt.",
+        "duplicated": "Box dupliziert.",
+        "rec_title": "Sitzung wiederherstellen?",
+        "rec_msg": "Der Trainer wurde letztes Mal nicht normal beendet. "
+                   "Nicht gespeicherte Sitzung wiederherstellen ({n} Seite(n))?",
+        "rec_done": "{n} Seite(n) wiederhergestellt.",
         "save": "Projekt speichern…", "load_proj": "Projekt laden…",
         "folder_none": "Datensatz-Ordner: (keiner gewählt)",
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
@@ -784,6 +808,7 @@ class TrainerWindow(QMainWindow):
         self._order_counter = 1
         self._undo = []           # snapshots of (page index, boxes, selection)
         self._redo = []
+        self._clipboard_box = None  # copied box for paste / duplicate
 
         root = QWidget()
         lay = QVBoxLayout()
@@ -857,7 +882,18 @@ class TrainerWindow(QMainWindow):
         self.overlay.boxChanged.connect(self._on_box_changed)
         self.overlay.boxRemoved.connect(self._on_box_removed)
         self.overlay.boxClicked.connect(self._on_box_clicked)
-        lay.addWidget(self.overlay, 1)
+        mid = QHBoxLayout()
+        mid.addWidget(self.overlay, 1)
+        box_col = QVBoxLayout()
+        self.lbl_boxes = QLabel(self._tr("boxes"))
+        box_col.addWidget(self.lbl_boxes)
+        self.box_list = QListWidget()
+        self.box_list.setFixedWidth(150)
+        self.box_list.setToolTip(self._tr("boxes_tip"))
+        self.box_list.currentRowChanged.connect(self._on_box_list_row)
+        box_col.addWidget(self.box_list, 1)
+        mid.addLayout(box_col)
+        lay.addLayout(mid, 1)
 
         shape_row = QHBoxLayout()
         self.lbl_tool = QLabel(self._tr("tool"))
@@ -1019,7 +1055,15 @@ class TrainerWindow(QMainWindow):
         QShortcut(QKeySequence("]"), self,
                   activated=lambda: self._goto(self._cur + 1))
         QShortcut(QKeySequence("F1"), self, activated=self._show_shortcuts)
+        QShortcut(QKeySequence.Copy, self, activated=self.on_copy_box)   # Ctrl+C
+        QShortcut(QKeySequence.Paste, self, activated=self.on_paste_box)  # Ctrl+V
+        QShortcut(QKeySequence("Ctrl+D"), self, activated=self.on_duplicate_box)
         self._update_undo_buttons()
+
+        # auto-save the session every minute for crash recovery
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.timeout.connect(self._autosave)
+        self._autosave_timer.start(60000)
 
         self._refresh_folder_label()
         self._refresh()
@@ -1050,6 +1094,10 @@ class TrainerWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._save_settings()                # remember window size/position
+        try:                                 # clean exit -> no crash recovery
+            os.remove(RECOVERY_FILE)
+        except OSError:
+            pass
         super(TrainerWindow, self).closeEvent(event)
 
     # -- keyboard helpers --
@@ -1065,6 +1113,111 @@ class TrainerWindow(QMainWindow):
     def _show_shortcuts(self):
         QMessageBox.information(self, self._tr("sh_title"), self._tr("sh_text"))
 
+    # -- box list panel --
+    def _rebuild_box_list(self):
+        lw = self.box_list
+        lw.blockSignals(True)                # avoid feedback while repopulating
+        lw.clear()
+        pg = self._page()
+        for i, b in enumerate(pg["boxes"] if pg else []):
+            order = b.get("order", 0)
+            num = str(order) if order else str(i + 1)
+            kind = "SFX" if b.get("kind") == "sfx" else "Bubble"
+            it = QListWidgetItem("%s   %s" % (num, kind))
+            it.setForeground(QColor(70, 130, 230) if b.get("kind") == "sfx"
+                             else QColor(230, 60, 60))
+            lw.addItem(it)
+        cur = getattr(self, "_current", -1)
+        lw.setCurrentRow(cur if 0 <= cur < lw.count() else -1)
+        lw.blockSignals(False)
+
+    def _on_box_list_row(self, row):
+        pg = self._page()
+        if pg and 0 <= row < len(pg["boxes"]) and row != self._current:
+            self._current = row
+            self._refresh()
+
+    # -- copy / paste / duplicate a box --
+    def on_copy_box(self):
+        pg = self._page()
+        cur = getattr(self, "_current", -1)
+        if pg and 0 <= cur < len(pg["boxes"]):
+            self._clipboard_box = copy.deepcopy(pg["boxes"][cur])
+            self._status(self._tr("copied"))
+
+    def on_paste_box(self):
+        if self._clipboard_box and self._page():
+            self._place_box(self._clipboard_box, 12, 12)
+            self._status(self._tr("pasted"))
+
+    def on_duplicate_box(self):
+        pg = self._page()
+        cur = getattr(self, "_current", -1)
+        if pg and 0 <= cur < len(pg["boxes"]):
+            self._place_box(pg["boxes"][cur], 15, 15)
+            self._status(self._tr("duplicated"))
+
+    def _place_box(self, box, dx, dy):
+        pg = self._page()
+        if not pg:
+            return
+        self._push_undo()
+        nb = copy.deepcopy(box)
+        nb["order"] = 0
+        w, h = pg["img"].width(), pg["img"].height()
+        nx = int(max(0, min(nb["x"] + dx, w - nb["w"])))
+        ny = int(max(0, min(nb["y"] + dy, h - nb["h"])))
+        ddx, ddy = nx - nb["x"], ny - nb["y"]
+        nb["x"], nb["y"] = nx, ny
+        if isinstance(nb.get("points"), list):
+            nb["points"] = [[px + ddx, py + ddy] for px, py in nb["points"]]
+        pg["boxes"].append(nb)
+        self._current = len(pg["boxes"]) - 1
+        self._refresh()
+
+    # -- auto-save / crash recovery --
+    def _autosave(self):
+        if not self._pages:
+            return
+        data = {"pages": [{"path": p["path"], "name": p["name"],
+                           "boxes": p["boxes"]} for p in self._pages]}
+        try:
+            with open(RECOVERY_FILE, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+        except OSError:
+            pass
+
+    def maybe_offer_recovery(self):
+        if not os.path.exists(RECOVERY_FILE):
+            return
+        try:
+            with open(RECOVERY_FILE, encoding="utf-8") as fh:
+                n = len(json.load(fh).get("pages", []))
+        except Exception:                    # noqa: BLE001
+            n = 0
+        if n <= 0:
+            self._discard_recovery()
+            return
+        ans = QMessageBox.question(
+            self, self._tr("rec_title"), self._tr("rec_msg").format(n=n),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if ans == QMessageBox.Yes:
+            pages = self._load_pages_from(RECOVERY_FILE)
+            if pages:
+                self._pages = pages
+                self._cur = -1
+                self._reset_history()
+                self._goto(0)
+                self._status(self._tr("rec_done").format(n=len(pages)))
+        else:
+            self._discard_recovery()
+
+    def _discard_recovery(self):
+        try:
+            os.remove(RECOVERY_FILE)
+        except OSError:
+            pass
+
     def _on_lang(self, _i):
         self._lang = self.lang_combo.currentData() or "en"
         self._save_settings()
@@ -1074,6 +1227,8 @@ class TrainerWindow(QMainWindow):
         t = self._tr
         self.setWindowTitle(t("title") + " v" + VERSION)
         self.lbl_intro.setText(t("intro"))
+        self.lbl_boxes.setText(t("boxes"))
+        self.box_list.setToolTip(t("boxes_tip"))
         self.load_btn.setText(t("load"))
         self.lbl_sort.setText(t("sort_by"))
         for i, _k in enumerate(("name", "unlabeled", "fewest", "most")):
@@ -1142,6 +1297,8 @@ class TrainerWindow(QMainWindow):
                 i=self._cur + 1, n=len(self._pages), name=pg["name"]))
         else:
             self.page_lbl.setText(self._tr("page_none"))
+        if hasattr(self, "box_list"):
+            self._rebuild_box_list()
 
     def _refresh_folder_label(self):
         self.folder_lbl.setText(
@@ -1555,37 +1712,43 @@ class TrainerWindow(QMainWindow):
             return
         self._status(self._tr("saved"))
 
+    @staticmethod
+    def _load_pages_from(path):
+        """Build the page list from a project/recovery .json (skips missing
+        images). Returns [] on error."""
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception:                    # noqa: BLE001
+            return []
+        pages = []
+        for pd in data.get("pages", []):
+            img = QImage(pd.get("path", ""))
+            if img.isNull():
+                continue
+            boxes = []
+            for b in pd.get("boxes", []):
+                nb = {"x": int(b["x"]), "y": int(b["y"]),
+                      "w": int(b["w"]), "h": int(b["h"]),
+                      "kind": "sfx" if b.get("kind") == "sfx" else "bubble",
+                      "order": int(b.get("order", 0) or 0),
+                      "shape": b.get("shape", "rect")}
+                if isinstance(b.get("points"), list):
+                    nb["points"] = b["points"]
+                boxes.append(nb)
+            pages.append({"path": pd.get("path", ""),
+                          "name": pd.get("name", "page"),
+                          "img": img.convertToFormat(QImage.Format_RGB888),
+                          "boxes": boxes})
+        return pages
+
     def on_load_project(self):
         path, _f = QFileDialog.getOpenFileName(
             self, self._tr("load_proj"), self._folder or os.path.expanduser("~"),
             self._tr("proj_filter"))
         if not path:
             return
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-            pages = []
-            for pd in data.get("pages", []):
-                img = QImage(pd.get("path", ""))
-                if img.isNull():
-                    continue
-                boxes = []
-                for b in pd.get("boxes", []):
-                    nb = {"x": int(b["x"]), "y": int(b["y"]),
-                          "w": int(b["w"]), "h": int(b["h"]),
-                          "kind": "sfx" if b.get("kind") == "sfx" else "bubble",
-                          "order": int(b.get("order", 0) or 0),
-                          "shape": b.get("shape", "rect")}
-                    if isinstance(b.get("points"), list):
-                        nb["points"] = b["points"]
-                    boxes.append(nb)
-                pages.append({"path": pd.get("path", ""),
-                              "name": pd.get("name", "page"),
-                              "img": img.convertToFormat(QImage.Format_RGB888),
-                              "boxes": boxes})
-        except Exception as exc:
-            self._status(self._tr("load_fail").format(msg=exc), error=True)
-            return
+        pages = self._load_pages_from(path)
         self._pages = pages
         self._cur = -1
         self._reset_history()
@@ -1767,7 +1930,9 @@ def main():
     win.show()
     if splash is not None:
         splash.finish(win)
-    # first launch: offer Desktop / Start-menu shortcuts (clickable dialog)
+    # offer to recover a session left over from a crash, then (first launch)
+    # offer to create shortcuts
+    win.maybe_offer_recovery()
     win.maybe_prompt_shortcut()
     # image paths passed on the command line open straight away as pages
     # (used by "Open in BubblR Trainer" in the BubblR AI ranking tool)
