@@ -21,13 +21,14 @@ from PyQt5.QtWidgets import (
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
-    QStackedWidget, QRadioButton)
+    QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
+    QStyle, QWidgetItem)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
-from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
+from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.0"
+VERSION = "4.1"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -197,6 +198,11 @@ LANG = {
         "settings_folder_title": "Dataset / export folder",
         "settings_folder_none": "(no folder chosen yet)",
         "settings_open": "Settings…",
+        "settings_layout": "Panels & layout",
+        "settings_unlock": "Unlock panels (allow moving & docking)",
+        "settings_unlock_hint": "When on, drag a panel by its title bar to move, "
+                                "dock or float it. Turn off to lock the layout.",
+        "dock_tools": "Tools", "dock_boxes": "Boxes", "dock_pages": "Pages",
         "export_page": "Export this page", "export_all": "Export all pages",
         "ready": "Load page images to begin.",
         "loaded": "{n} image(s) loaded.",
@@ -375,6 +381,12 @@ LANG = {
         "settings_folder_title": "Dataset-/Export-Ordner",
         "settings_folder_none": "(noch kein Ordner gewählt)",
         "settings_open": "Einstellungen…",
+        "settings_layout": "Panels & Layout",
+        "settings_unlock": "Panels entsperren (verschieben & andocken)",
+        "settings_unlock_hint": "Wenn aktiv, ein Panel an seiner Titelleiste "
+                                "ziehen zum Verschieben, Andocken oder Lösen. "
+                                "Ausschalten sperrt das Layout.",
+        "dock_tools": "Werkzeuge", "dock_boxes": "Boxen", "dock_pages": "Seiten",
         "export_page": "Diese Seite exportieren", "export_all": "Alle Seiten exportieren",
         "ready": "Zum Start Seitenbilder laden.",
         "loaded": "{n} Bild(er) geladen.",
@@ -1210,6 +1222,115 @@ class BoxOverlay(QWidget):
         return bb
 
 
+class FlowLayout(QLayout):
+    """A layout that lays its items left-to-right and wraps to the next line
+    when it runs out of width — so a panel of tool buttons reflows to fit
+    whether the dock is wide (buttons in a row) or narrow (buttons stacked)."""
+
+    def __init__(self, parent=None, margin=4, spacing=4):
+        super(FlowLayout, self).__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self._spacing = spacing
+        self._items = []
+
+    def addItem(self, item):            # noqa: N802 (Qt override)
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):                # noqa: N802
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):                # noqa: N802
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):      # noqa: N802
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):        # noqa: N802
+        return True
+
+    def heightForWidth(self, width):    # noqa: N802
+        return self._do_layout(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect):        # noqa: N802
+        super(FlowLayout, self).setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):                 # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self):              # noqa: N802
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        m = self.contentsMargins()
+        x = rect.x() + m.left()
+        y = rect.y() + m.top()
+        right = rect.right() - m.right()
+        line_h = 0
+        for item in self._items:
+            w = item.sizeHint().width()
+            h = item.sizeHint().height()
+            if x + w > right and line_h > 0:      # wrap to the next line
+                x = rect.x() + m.left()
+                y = y + line_h + self._spacing
+                line_h = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+            x = x + w + self._spacing
+            line_h = max(line_h, h)
+        return y + line_h + m.bottom() - rect.y()
+
+
+def make_tool_icon(kind, size=24):
+    """A small Krita-style icon for a selection tool, drawn on the fly so no
+    image assets are needed (light strokes for the dark theme)."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    ink = QColor(225, 228, 232)
+    pen = QPen(ink, 1.6)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    m = 4
+    if kind == "rect":                       # rectangular marquee (dashed)
+        pen.setStyle(Qt.DashLine)
+        p.setPen(pen)
+        p.drawRect(m, m + 1, size - 2 * m, size - 2 * m - 2)
+    elif kind == "ellipse":                  # elliptical marquee (dashed)
+        pen.setStyle(Qt.DashLine)
+        p.setPen(pen)
+        p.drawEllipse(m, m, size - 2 * m, size - 2 * m)
+    elif kind == "lasso":                    # freehand / polygon lasso loop
+        poly = QPolygonF([
+            QPointF(m + 1, size - m), QPointF(m, m + 4),
+            QPointF(size * 0.5, m), QPointF(size - m, m + 3),
+            QPointF(size - m - 1, size - m - 3),
+            QPointF(size * 0.55, size - m - 1)])
+        p.drawPolyline(poly)
+    else:                                    # magic wand: a stick + a spark
+        p.drawLine(int(size - m - 1), int(m + 1),
+                   int(m + 4), int(size - m - 1))
+        star = QColor(120, 200, 250)
+        p.setPen(QPen(star, 1.4))
+        cx, cy, r = size - m - 3, m + 3, 3.2
+        for ang in (0, 90, 180, 270):
+            a = math.radians(ang)
+            p.drawLine(QPointF(cx, cy),
+                       QPointF(cx + r * math.cos(a), cy + r * math.sin(a)))
+    p.end()
+    return QIcon(pm)
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -1221,6 +1342,7 @@ class TrainerWindow(QMainWindow):
         self._lang = cfg.get("lang", "en")
         self._folder = cfg.get("folder", "")
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
+        self._locked = cfg.get("locked", True)   # panels locked (Krita-style)
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
         self._new_kind = "bubble"
@@ -1290,13 +1412,11 @@ class TrainerWindow(QMainWindow):
         self.overlay.rubberSelect.connect(self._on_rubber_select)
         self.overlay.boxContextMenu.connect(self._on_box_context)
         self.overlay.canvasContextMenu.connect(self._on_canvas_context)
-        mid = QHBoxLayout()
-        mid.addWidget(self.overlay, 1)
-        box_col = QVBoxLayout()
-        self.lbl_boxes = QLabel(self._tr("boxes"))
-        box_col.addWidget(self.lbl_boxes)
+        lay.addWidget(self.overlay, 1)          # the canvas is the central area
+
+        # --- Boxes list (moves into its own docker) ---
         self.box_list = QListWidget()
-        self.box_list.setFixedWidth(150)
+        self.box_list.setMinimumWidth(120)
         self.box_list.setToolTip(self._tr("boxes_tip"))
         self.box_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.box_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -1304,67 +1424,63 @@ class TrainerWindow(QMainWindow):
         self.box_list.model().rowsMoved.connect(self._on_boxes_reordered)
         self.box_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.box_list.customContextMenuRequested.connect(self._on_box_list_context)
-        box_col.addWidget(self.box_list, 1)
-        mid.addLayout(box_col)
-        lay.addLayout(mid, 1)
 
-        # horizontal strip of page thumbnails: click to jump, ✓ = labelled
+        # --- Page thumbnails (docker; flow flips to vertical on a side dock) ---
         self.page_strip = QListWidget()
         self.page_strip.setViewMode(QListWidget.IconMode)
         self.page_strip.setFlow(QListWidget.LeftToRight)
         self.page_strip.setWrapping(False)
         self.page_strip.setMovement(QListWidget.Static)
         self.page_strip.setIconSize(QSize(78, 88))
-        self.page_strip.setFixedHeight(122)
         self.page_strip.setSpacing(4)
-        self.page_strip.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.page_strip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.page_strip.setToolTip(self._tr("strip_tip"))
         self.page_strip.currentRowChanged.connect(self._on_page_strip_row)
         self.page_strip.setContextMenuPolicy(Qt.CustomContextMenu)
         self.page_strip.customContextMenuRequested.connect(
             self._on_page_strip_context)
-        lay.addWidget(self.page_strip)
 
-        shape_row = QHBoxLayout()
-        self.lbl_tool = QLabel(self._tr("tool"))
-        shape_row.addWidget(self.lbl_tool)
+        # --- Marking tools: icon-only buttons (Krita-style select shapes) ---
         self._tg = QButtonGroup(self)
         self._tg.setExclusive(True)
         self.tool_btns = {}
         for _key in ("rect", "ellipse", "lasso", "wand"):
-            btn = QPushButton(self._tr("tool_" + _key))
+            btn = QToolButton()
             btn.setCheckable(True)
+            btn.setIcon(make_tool_icon(_key))
+            btn.setIconSize(QSize(24, 24))
+            btn.setAutoRaise(True)
+            btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
             btn.setToolTip(self._tr("tool_" + _key + "_hint"))
             btn.clicked.connect(lambda _c, k=_key: self._on_tool(k))
-            btn.setStyleSheet("QPushButton:checked{background:#3daee9;color:white;}")
+            btn.setStyleSheet(
+                "QToolButton{padding:5px;} QToolButton:checked{background:#3daee9;}")
             self._tg.addButton(btn)
-            shape_row.addWidget(btn)
             self.tool_btns[_key] = btn
         self.tool_btns["rect"].setChecked(True)
-        shape_row.addSpacing(10)
         self.lbl_tol = QLabel(self._tr("wand_tol"))
-        shape_row.addWidget(self.lbl_tol)
         self.tol_spin = QSpinBox()
         self.tol_spin.setRange(1, 255)
         self.tol_spin.setValue(40)
         self.tol_spin.setFixedWidth(58)
         self.tol_spin.setToolTip(self._tr("wand_tol_tip"))
         self.tol_spin.valueChanged.connect(self.overlay.set_wand_tolerance)
-        shape_row.addWidget(self.tol_spin)
-        shape_row.addSpacing(10)
+
+        self._build_docks()
+
+        # view-option checkboxes (centre marker, order path)
+        opt_row = QHBoxLayout()
         self.center_chk = QCheckBox(self._tr("center_marker"))
         self.center_chk.setChecked(True)
         self.center_chk.setToolTip(self._tr("center_marker_tip"))
         self.center_chk.toggled.connect(self.overlay.set_center_marker)
-        shape_row.addWidget(self.center_chk)
+        opt_row.addWidget(self.center_chk)
         self.path_chk = QCheckBox(self._tr("order_path"))
         self.path_chk.setChecked(False)
         self.path_chk.setToolTip(self._tr("order_path_tip"))
         self.path_chk.toggled.connect(self.overlay.set_order_path)
-        shape_row.addWidget(self.path_chk)
-        shape_row.addStretch(1)
-        lay.addLayout(shape_row)
+        opt_row.addWidget(self.path_chk)
+        opt_row.addStretch(1)
+        lay.addLayout(opt_row)
 
         tools = QHBoxLayout()
         self.undo_btn = QPushButton(self._tr("undo"))
@@ -1470,6 +1586,14 @@ class TrainerWindow(QMainWindow):
                 self.restoreGeometry(bytes.fromhex(geo))
             except Exception:                # noqa: BLE001
                 pass
+        dockstate = cfg.get("dockstate")
+        if dockstate:                        # restore last docker arrangement
+            try:
+                self.restoreState(bytes.fromhex(dockstate))
+                self._apply_thumbs_flow(self.dockWidgetArea(self.thumbs_dock))
+                self._apply_dock_lock()      # restore hides title bars again
+            except Exception:                # noqa: BLE001
+                pass
 
         # menu bar (also carries the keyboard shortcuts); Esc stays a shortcut
         self._build_menu()
@@ -1497,9 +1621,10 @@ class TrainerWindow(QMainWindow):
 
     def _save_settings(self):
         data = {"lang": self._lang, "folder": self._folder,
-                "ai_dir": self._ai_dir}
+                "ai_dir": self._ai_dir, "locked": self._locked}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
+            data["dockstate"] = bytes(self.saveState()).hex()
         except Exception:                    # noqa: BLE001
             pass
         try:
@@ -1507,6 +1632,87 @@ class TrainerWindow(QMainWindow):
                 json.dump(data, fh)
         except Exception:
             pass
+
+    # -- dockable panels (Tools / Boxes / Pages), Krita-style ----------------
+    def _build_docks(self):
+        """Wrap the tools, box list and thumbnail strip in movable dockers."""
+        # Tools docker: icon-only marking tools (reflow) + wand tolerance
+        tools_w = QWidget()
+        tv = QVBoxLayout(tools_w)
+        tv.setContentsMargins(4, 4, 4, 4)
+        flow_host = QWidget()
+        self._tools_flow = FlowLayout(flow_host, margin=0, spacing=4)
+        for k in ("rect", "ellipse", "lasso", "wand"):
+            self._tools_flow.addWidget(self.tool_btns[k])
+        tv.addWidget(flow_host)
+        tolw = QWidget()
+        th = QHBoxLayout(tolw)
+        th.setContentsMargins(0, 0, 0, 0)
+        th.addWidget(self.lbl_tol)
+        th.addWidget(self.tol_spin)
+        th.addStretch(1)
+        tv.addWidget(tolw)
+        tv.addStretch(1)
+        self.tools_dock = QDockWidget(self._tr("dock_tools"), self)
+        self.tools_dock.setObjectName("toolsDock")
+        self.tools_dock.setWidget(tools_w)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.tools_dock)
+
+        # Boxes docker
+        self.boxes_dock = QDockWidget(self._tr("dock_boxes"), self)
+        self.boxes_dock.setObjectName("boxesDock")
+        self.boxes_dock.setWidget(self.box_list)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.boxes_dock)
+
+        # Pages (thumbnails) docker — flow adapts to which side it sits on
+        self.thumbs_dock = QDockWidget(self._tr("dock_pages"), self)
+        self.thumbs_dock.setObjectName("thumbsDock")
+        self.thumbs_dock.setWidget(self.page_strip)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.thumbs_dock)
+        self.thumbs_dock.dockLocationChanged.connect(self._apply_thumbs_flow)
+
+        self._docks = [self.tools_dock, self.boxes_dock, self.thumbs_dock]
+        for d in self._docks:
+            d.setAllowedAreas(Qt.AllDockWidgetAreas)
+        self._apply_thumbs_flow(Qt.BottomDockWidgetArea)
+        self._apply_dock_lock()
+
+    def _apply_thumbs_flow(self, area):
+        """Thumbnails run in a row on the top/bottom, in a column on the sides."""
+        vertical = area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea)
+        s = self.page_strip
+        BIG = 16777215
+        if vertical:
+            s.setFlow(QListWidget.TopToBottom)
+            s.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            s.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            s.setMinimumHeight(0)
+            s.setMaximumHeight(BIG)
+            s.setMinimumWidth(96)
+            s.setMaximumWidth(150)
+        else:
+            s.setFlow(QListWidget.LeftToRight)
+            s.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            s.setMinimumWidth(0)
+            s.setMaximumWidth(BIG)
+            s.setMinimumHeight(104)
+            s.setMaximumHeight(140)
+
+    def _apply_dock_lock(self):
+        """Locked = titles stay but panels can't be dragged/floated; unlocked =
+        movable & floatable (Krita/TypeR-style)."""
+        for d in getattr(self, "_docks", []):
+            if self._locked:
+                d.setFeatures(QDockWidget.NoDockWidgetFeatures)
+            else:
+                d.setFeatures(QDockWidget.DockWidgetMovable
+                              | QDockWidget.DockWidgetFloatable)
+
+    def set_layout_locked(self, locked):
+        self._locked = bool(locked)
+        self._apply_dock_lock()
+        self._save_settings()
 
     def _unexported_count(self):
         """Pages that have boxes but have not been exported into the dataset."""
@@ -1747,6 +1953,18 @@ class TrainerWindow(QMainWindow):
         rb_de.setChecked(self._lang == "de")
         dv.addWidget(rb_en)
         dv.addWidget(rb_de)
+        dv.addSpacing(14)
+        layout_title = QLabel()
+        layout_title.setStyleSheet("font-weight: bold;")
+        dv.addWidget(layout_title)
+        unlock_chk = QCheckBox()
+        unlock_chk.setChecked(not self._locked)
+        unlock_chk.toggled.connect(lambda on: self.set_layout_locked(not on))
+        dv.addWidget(unlock_chk)
+        unlock_hint = QLabel()
+        unlock_hint.setWordWrap(True)
+        unlock_hint.setStyleSheet("color: gray;")
+        dv.addWidget(unlock_hint)
         dv.addStretch(1)
 
         # -- Storage page: dataset/export folder --
@@ -1784,6 +2002,9 @@ class TrainerWindow(QMainWindow):
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
             lang_title.setText(tr("mi_language"))
+            layout_title.setText(tr("settings_layout"))
+            unlock_chk.setText(tr("settings_unlock"))
+            unlock_hint.setText(tr("settings_unlock_hint"))
             store_title.setText(tr("settings_folder_title"))
             choose_btn.setText(tr("mi_folder"))
             path_lbl.setText(self._folder or tr("settings_folder_none"))
@@ -2050,16 +2271,16 @@ class TrainerWindow(QMainWindow):
         self.setWindowTitle(t("title") + " v" + VERSION)
         self._retranslate_menu()
         self.lbl_intro.setText(t("intro"))
-        self.lbl_boxes.setText(t("boxes"))
+        self.tools_dock.setWindowTitle(t("dock_tools"))
+        self.boxes_dock.setWindowTitle(t("dock_boxes"))
+        self.thumbs_dock.setWindowTitle(t("dock_pages"))
         self.box_list.setToolTip(t("boxes_tip"))
         self.page_strip.setToolTip(t("strip_tip"))
         self.lbl_sort.setText(t("sort_by"))
         for i, _k in enumerate(("name", "unlabeled", "fewest", "most")):
             self.sort_combo.setItemText(i, t("sort_" + _k))
         self.next_todo_btn.setText(t("next_todo"))
-        self.lbl_tool.setText(t("tool"))
         for _k, _btn in self.tool_btns.items():
-            _btn.setText(t("tool_" + _k))
             _btn.setToolTip(t("tool_" + _k + "_hint"))
         self.lbl_tol.setText(t("wand_tol"))
         self.tol_spin.setToolTip(t("wand_tol_tip"))
@@ -2861,7 +3082,12 @@ def apply_krita_dark(app):
         # labelling progress bar
         "QProgressBar{background:#232629;border:1px solid #4d4d4d;"
         "border-radius:3px;text-align:center;color:#eff0f1;}"
-        "QProgressBar::chunk{background:#3daee9;border-radius:2px;}")
+        "QProgressBar::chunk{background:#3daee9;border-radius:2px;}"
+        # dockable panels (Tools / Boxes / Pages)
+        "QDockWidget{color:#eff0f1;titlebar-close-icon:none;}"
+        "QDockWidget::title{background:#31363b;padding:4px 8px;"
+        "border:1px solid #4d4d4d;}"
+        "QMainWindow::separator{background:#31363b;width:4px;height:4px;}")
 
 
 def _resource(*parts):

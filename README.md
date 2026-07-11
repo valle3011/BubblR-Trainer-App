@@ -109,7 +109,14 @@ buttons do, each item showing its shortcut.
 | **Ctrl+W** | close the current page |
 | Mouse wheel / middle-drag | zoom / pan |
 
-- A **page thumbnail strip** under the image lets you jump to any page with a
+- **Dockable panels (Krita-style):** the **Tools** (icon-only marking tools +
+  wand tolerance), **Boxes** and **Pages** (thumbnails) panels are dock widgets
+  you can rearrange around the canvas. The layout is **locked by default** —
+  tick *Settings → Display → Unlock panels* to drag them by their title bar to
+  any edge or float them (like TypeR); untick to lock again. The thumbnail
+  panel **reflows automatically**: a row of thumbnails on the top/bottom, a
+  column when docked to the left/right. Positions are remembered between runs.
+- A **page thumbnail strip** lets you jump to any page with a
   click. Each thumbnail shows its status: **✓** = exported to the dataset,
   **•** = has boxes but not exported yet, nothing = still empty (editing an
   exported page flips it back to **•** so you know it needs re-exporting).
