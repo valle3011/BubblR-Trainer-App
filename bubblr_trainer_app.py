@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.3"
+VERSION = "3.4"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -393,26 +393,20 @@ def order_data(boxes, img_w, img_h):
     return {"width": img_w, "height": img_h, "boxes": out}
 
 
-def auto_order(boxes, rtl=True):
-    """Rank the boxes into a reading order automatically: group them into tiers
-    (top to bottom), then order within a tier right-to-left for manga (rtl) or
-    left-to-right otherwise. Fills each box's 'order'. You only fix the few it
-    gets wrong instead of clicking every bubble.
+def _tier_order(indices, boxes, rtl):
+    """Order a leaf cluster (no clean panel cut left) by VERTICAL-OVERLAP tiers.
 
-    Tiers are formed by VERTICAL OVERLAP, not by a fixed centre-distance band.
     Two bubbles share a tier when their vertical spans overlap by more than a
-    third of the smaller one's height. This is scale-aware — a big dramatic
-    bubble next to a small one is grouped correctly, and clearly side-by-side
-    but vertically staggered bubbles stay together — which a single global band
-    from the median height gets wrong. Each tier keeps the span of its top-most
-    bubble as the reference (it does not grow downward), so a vertical stack of
-    bubbles does not chain into one giant horizontal tier."""
-    n = len(boxes)
-    if n == 0:
-        return
-    spans = [(b["y"], b["y"] + b["h"]) for b in boxes]
-    # open tiers top-down; each bubble joins the tier it overlaps most, else new
-    order_by_top = sorted(range(n), key=lambda i: (spans[i][0], boxes[i]["x"]))
+    third of the smaller one's height — scale-aware, so a big dramatic bubble
+    next to a small one groups correctly and staggered side-by-side bubbles
+    stay together. Each tier keeps its top-most bubble's span as a fixed
+    reference (it does not grow downward), so a vertical stack does not chain
+    into one giant horizontal tier."""
+    idx = list(indices)
+    if len(idx) <= 1:
+        return idx
+    spans = {i: (boxes[i]["y"], boxes[i]["y"] + boxes[i]["h"]) for i in idx}
+    order_by_top = sorted(idx, key=lambda i: (spans[i][0], boxes[i]["x"]))
     tiers = []                       # each: {"top", "bot", "items": [...]}
     for i in order_by_top:
         top, bot = spans[i]
@@ -429,14 +423,90 @@ def auto_order(boxes, rtl=True):
         else:
             tiers.append({"top": top, "bot": bot, "items": [i]})
     tiers.sort(key=lambda t: t["top"])
-    rank = 1
+    out = []
     for tier in tiers:
         # stable sort: equal-x bubbles keep their top-to-bottom order
         tier["items"].sort(
             key=lambda i: boxes[i]["x"] + boxes[i]["w"] / 2.0, reverse=rtl)
-        for i in tier["items"]:
-            boxes[i]["order"] = rank
-            rank += 1
+        out.extend(tier["items"])
+    return out
+
+
+def _axis_iv(i, boxes, axis):
+    b = boxes[i]
+    return (b["y"], b["y"] + b["h"]) if axis == "y" else (b["x"], b["x"] + b["w"])
+
+
+def _best_gap(indices, boxes, axis):
+    """Largest CLEAN gap along axis: a coordinate no box crosses, with boxes on
+    both sides. Returns (gap, low_side_indices, high_side_indices) or None. The
+    split is clean because, scanning boxes sorted by their leading edge, a gap
+    only counts where the next box starts past the running far edge of every
+    box before it — so the two sides never interleave along this axis."""
+    iv = sorted(((_axis_iv(i, boxes, axis), i) for i in indices),
+                key=lambda t: t[0][0])
+    max_hi = iv[0][0][1]
+    best_gap, best_split = 0.0, None
+    for k in range(1, len(iv)):
+        lo = iv[k][0][0]
+        if lo > max_hi and (lo - max_hi) > best_gap:
+            best_gap, best_split = lo - max_hi, k
+        max_hi = max(max_hi, iv[k][0][1])
+    if best_split is None:
+        return None
+    low = [iv[k][1] for k in range(best_split)]
+    high = [iv[k][1] for k in range(best_split, len(iv))]
+    return best_gap, low, high
+
+
+def _axis_overlap(ga, gb, boxes, axis):
+    """Do the bounding intervals of two groups overlap on the given axis?"""
+    a = [_axis_iv(i, boxes, axis) for i in ga]
+    b = [_axis_iv(i, boxes, axis) for i in gb]
+    alo, ahi = min(x[0] for x in a), max(x[1] for x in a)
+    blo, bhi = min(x[0] for x in b), max(x[1] for x in b)
+    return min(ahi, bhi) - max(alo, blo) > 0
+
+
+def _panel_order(indices, boxes, rtl):
+    """Recursive XY-cut on the bubble positions (panel-aware reading order).
+
+    At each step split the region at its most prominent clean gutter:
+      * a horizontal gutter whose two sides share the same columns (they stack)
+        is a TIER boundary -> read the top tier fully, then the bottom;
+      * a vertical gutter whose two sides share the same rows (side by side) is
+        a COLUMN/panel boundary -> read the right column fully first for manga.
+    Manga is tier-primary, so a valid horizontal cut is preferred. When neither
+    a stacked nor a side-by-side gutter exists, the cluster is an overlapping
+    blob and is ordered by _tier_order. This nests panels correctly (e.g. a
+    tall right panel beside a left column, or a 2x2 grid with a split cell)."""
+    indices = list(indices)
+    if len(indices) <= 1:
+        return indices
+    yc = _best_gap(indices, boxes, "y")
+    xc = _best_gap(indices, boxes, "x")
+    if yc and _axis_overlap(yc[1], yc[2], boxes, "x"):          # tier boundary
+        return (_panel_order(yc[1], boxes, rtl)
+                + _panel_order(yc[2], boxes, rtl))
+    if xc and _axis_overlap(xc[1], xc[2], boxes, "y"):          # column boundary
+        left, right = xc[1], xc[2]
+        first, second = (right, left) if rtl else (left, right)
+        return (_panel_order(first, boxes, rtl)
+                + _panel_order(second, boxes, rtl))
+    return _tier_order(indices, boxes, rtl)
+
+
+def auto_order(boxes, rtl=True):
+    """Assign a reading order to every box automatically. Manga (rtl) is read
+    tier by tier top-to-bottom, each tier's panels right-to-left; a recursive
+    panel cut (_panel_order) reproduces that from the bubble layout, falling
+    back to overlap tiers where panels can't be separated. You only fix the few
+    it gets wrong instead of clicking every bubble."""
+    n = len(boxes)
+    if n == 0:
+        return
+    for rank, i in enumerate(_panel_order(list(range(n)), boxes, rtl), 1):
+        boxes[i]["order"] = rank
 
 
 # ---------------------------------------------------------------------------
