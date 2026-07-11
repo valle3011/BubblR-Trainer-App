@@ -130,7 +130,8 @@ buttons do, each item showing its shortcut.
   The **Pages** panel adapts automatically: a scrolling row of thumbnails on
   the top/bottom, and a **grid on the left/right** that grows the thumbnails as
   you widen it and then **reflows to 2, then 3 … columns** instead of one
-  ever-bigger column. All positions are remembered between runs.
+  ever-bigger column. Panel **positions and sizes** (how wide/tall you dragged
+  each dock) and the window size are all remembered between runs.
 - A **page thumbnail strip** lets you jump to any page with a
   click. Each thumbnail shows its status: **✓** = exported to the dataset,
   **•** = has boxes but not exported yet, nothing = still empty (editing an

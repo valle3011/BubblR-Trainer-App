@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.9"
+VERSION = "5.0"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1613,14 +1613,11 @@ class TrainerWindow(QMainWindow):
                 self.restoreGeometry(bytes.fromhex(geo))
             except Exception:                # noqa: BLE001
                 pass
-        dockstate = cfg.get("dockstate")
-        if dockstate:                        # restore last docker arrangement
-            try:
-                self.restoreState(bytes.fromhex(dockstate))
-                self._apply_thumbs_flow(self.dockWidgetArea(self.thumbs_dock))
-                self._apply_dock_lock()      # restore hides title bars again
-            except Exception:                # noqa: BLE001
-                pass
+        # Restore the docker arrangement + sizes on the first show (not here):
+        # in the constructor the layout isn't active yet, so restoreState gets
+        # the dock POSITIONS but not their SIZES right. Deferring to showEvent
+        # makes the panel widths/heights persist correctly across runs.
+        self._pending_dockstate = cfg.get("dockstate")
 
         # menu bar (also carries the keyboard shortcuts); Esc stays a shortcut
         self._build_menu()
@@ -1775,6 +1772,22 @@ class TrainerWindow(QMainWindow):
         """Pages that have boxes but have not been exported into the dataset."""
         return sum(1 for p in self._pages
                    if p["boxes"] and not p.get("exported"))
+
+    def showEvent(self, event):
+        super(TrainerWindow, self).showEvent(event)
+        # restore the saved docker layout + sizes once the window is live, so
+        # panel widths/heights come back exactly as the user left them
+        if not getattr(self, "_state_restored", False):
+            self._state_restored = True
+            ds = getattr(self, "_pending_dockstate", None)
+            if ds:
+                try:
+                    self.restoreState(bytes.fromhex(ds))
+                    self._apply_thumbs_flow(
+                        self.dockWidgetArea(self.thumbs_dock))
+                    self._apply_dock_lock()
+                except Exception:            # noqa: BLE001
+                    pass
 
     def closeEvent(self, event):
         n = self._unexported_count()
