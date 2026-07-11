@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "3.2"
+VERSION = "3.3"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -394,29 +394,47 @@ def order_data(boxes, img_w, img_h):
 
 
 def auto_order(boxes, rtl=True):
-    """Rank the boxes into a reading order automatically: group them into rows
-    (top to bottom), then order within a row right-to-left for manga (rtl) or
+    """Rank the boxes into a reading order automatically: group them into tiers
+    (top to bottom), then order within a tier right-to-left for manga (rtl) or
     left-to-right otherwise. Fills each box's 'order'. You only fix the few it
-    gets wrong instead of clicking every bubble."""
+    gets wrong instead of clicking every bubble.
+
+    Tiers are formed by VERTICAL OVERLAP, not by a fixed centre-distance band.
+    Two bubbles share a tier when their vertical spans overlap by more than a
+    third of the smaller one's height. This is scale-aware — a big dramatic
+    bubble next to a small one is grouped correctly, and clearly side-by-side
+    but vertically staggered bubbles stay together — which a single global band
+    from the median height gets wrong. Each tier keeps the span of its top-most
+    bubble as the reference (it does not grow downward), so a vertical stack of
+    bubbles does not chain into one giant horizontal tier."""
     n = len(boxes)
     if n == 0:
         return
-    order_by_y = sorted(range(n),
-                        key=lambda i: boxes[i]["y"] + boxes[i]["h"] / 2.0)
-    heights = sorted(boxes[i]["h"] for i in order_by_y)
-    band = max(1.0, heights[n // 2] * 0.6)     # ~60% of the median height
-    rows = []
-    for i in order_by_y:
-        cy = boxes[i]["y"] + boxes[i]["h"] / 2.0
-        if rows and cy - rows[-1]["anchor"] <= band:
-            rows[-1]["items"].append(i)
+    spans = [(b["y"], b["y"] + b["h"]) for b in boxes]
+    # open tiers top-down; each bubble joins the tier it overlaps most, else new
+    order_by_top = sorted(range(n), key=lambda i: (spans[i][0], boxes[i]["x"]))
+    tiers = []                       # each: {"top", "bot", "items": [...]}
+    for i in order_by_top:
+        top, bot = spans[i]
+        h = bot - top
+        best, best_ov = None, 0.0
+        for tier in tiers:
+            ov = min(bot, tier["bot"]) - max(top, tier["top"])
+            ref_h = tier["bot"] - tier["top"]
+            frac = ov / max(1.0, min(h, ref_h))
+            if frac > 0.35 and ov > best_ov:
+                best, best_ov = tier, ov
+        if best is not None:
+            best["items"].append(i)
         else:
-            rows.append({"anchor": cy, "items": [i]})
+            tiers.append({"top": top, "bot": bot, "items": [i]})
+    tiers.sort(key=lambda t: t["top"])
     rank = 1
-    for row in rows:
-        row["items"].sort(
+    for tier in tiers:
+        # stable sort: equal-x bubbles keep their top-to-bottom order
+        tier["items"].sort(
             key=lambda i: boxes[i]["x"] + boxes[i]["w"] / 2.0, reverse=rtl)
-        for i in row["items"]:
+        for i in tier["items"]:
             boxes[i]["order"] = rank
             rank += 1
 
