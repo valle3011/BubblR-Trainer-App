@@ -19,13 +19,13 @@ from PyQt5.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut, QSplashScreen,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-    QAbstractItemView, QInputDialog, QActionGroup)
+    QAbstractItemView, QInputDialog, QActionGroup, QMenu)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.7"
+VERSION = "2.8"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -426,6 +426,7 @@ class BoxOverlay(QWidget):
     boxAdded = pyqtSignal(float, float, float, float, str, object)
     boxChanged = pyqtSignal(int, float, float, float, float)
     rubberSelect = pyqtSignal(float, float, float, float)  # x, y, w, h in doc
+    boxContextMenu = pyqtSignal(int, QPoint)               # idx, global pos
 
     _HANDLE = 9
     # which box edges a handle moves ('l'eft 'r'ight 't'op 'b'ottom)
@@ -780,7 +781,7 @@ class BoxOverlay(QWidget):
         if event.button() == Qt.RightButton:
             idx = self._hit(event.pos())
             if idx >= 0:
-                self.boxRemoved.emit(idx)
+                self.boxContextMenu.emit(idx, event.globalPos())
             return
         if event.button() != Qt.LeftButton:
             return
@@ -1089,6 +1090,7 @@ class TrainerWindow(QMainWindow):
         self.overlay.boxRemoved.connect(self._on_box_removed)
         self.overlay.boxClicked.connect(self._on_box_clicked)
         self.overlay.rubberSelect.connect(self._on_rubber_select)
+        self.overlay.boxContextMenu.connect(self._on_box_context)
         mid = QHBoxLayout()
         mid.addWidget(self.overlay, 1)
         box_col = QVBoxLayout()
@@ -1101,6 +1103,8 @@ class TrainerWindow(QMainWindow):
         self.box_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.box_list.itemSelectionChanged.connect(self._on_box_list_selection)
         self.box_list.model().rowsMoved.connect(self._on_boxes_reordered)
+        self.box_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.box_list.customContextMenuRequested.connect(self._on_box_list_context)
         box_col.addWidget(self.box_list, 1)
         mid.addLayout(box_col)
         lay.addLayout(mid, 1)
@@ -1348,6 +1352,42 @@ class TrainerWindow(QMainWindow):
             self._sel = set(range(len(pg["boxes"])))
             self._current = len(pg["boxes"]) - 1
             self._refresh()
+
+    # -- right-click context menu on a box / box-list row --
+    def _on_box_context(self, idx, gpos):
+        pg = self._page()
+        if not pg or not (0 <= idx < len(pg["boxes"])):
+            return
+        if idx not in self._sel:             # right-click outside the selection
+            self._current = idx              #   -> select just this box first
+            self._sel = {idx}
+            k = pg["boxes"][idx].get("kind", "bubble")
+            self._set_kind_buttons(k)
+            self._new_kind = k
+            self._refresh()
+        self._show_box_menu(gpos)
+
+    def _on_box_list_context(self, pos):
+        it = self.box_list.itemAt(pos)
+        if it is None:
+            return
+        if self.box_list.row(it) not in self._sel:
+            self.box_list.clearSelection()   # selecting fires the sel handler
+            it.setSelected(True)
+        self._show_box_menu(self.box_list.viewport().mapToGlobal(pos))
+
+    def _show_box_menu(self, gpos):
+        if not self._sel:
+            return
+        t = self._tr
+        menu = QMenu(self)
+        menu.addAction(t("mi_del"), lambda: self.on_delete())
+        menu.addAction(t("mi_dup"), lambda: self.on_duplicate_box())
+        menu.addAction(t("fit_box"), lambda: self.on_fit_box())
+        menu.addSeparator()
+        menu.addAction(t("mi_bubble"), lambda: self._kbd_set_kind("bubble"))
+        menu.addAction(t("mi_sfx"), lambda: self._kbd_set_kind("sfx"))
+        menu.exec_(gpos)
 
     def _show_shortcuts(self):
         QMessageBox.information(self, self._tr("sh_title"), self._tr("sh_text"))
