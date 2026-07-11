@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.1"
+VERSION = "5.2"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1427,6 +1427,7 @@ class TrainerWindow(QMainWindow):
         cfg = self._load_settings()
         self._lang = cfg.get("lang", "en")
         self._folder = cfg.get("folder", "")
+        self._last_dir = cfg.get("last_dir", "")  # last place a dialog was used
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
@@ -1649,7 +1650,7 @@ class TrainerWindow(QMainWindow):
                 "ai_dir": self._ai_dir, "locked": self._locked,
                 "wand_tol": self._wand_tol, "auto_order_on": self._auto_order,
                 "rtl": self._rtl, "new_kind": self._new_kind,
-                "center_marker": self._center}
+                "center_marker": self._center, "last_dir": self._last_dir}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -2889,21 +2890,36 @@ class TrainerWindow(QMainWindow):
             self._current = -1
             self._refresh()
 
+    # -- file-dialog directory memory --
+    def _start_dir(self):
+        """Where a file/folder dialog should open: the last place used, else the
+        home folder (deliberately not the dataset folder)."""
+        if self._last_dir and os.path.isdir(self._last_dir):
+            return self._last_dir
+        return os.path.expanduser("~")
+
+    def _remember_dir(self, directory):
+        """Remember a chosen directory so the next dialog starts there."""
+        if directory and os.path.isdir(directory) and directory != self._last_dir:
+            self._last_dir = directory
+            self._save_settings()
+
     # -- actions --
     def on_load_images(self):
         paths, _f = QFileDialog.getOpenFileNames(
-            self, self._tr("load"), self._folder or os.path.expanduser("~"),
+            self, self._tr("load"), self._start_dir(),
             self._tr("img_filter"))
         if paths:
+            self._remember_dir(os.path.dirname(paths[0]))
             self.add_image_paths(paths)
 
     def on_load_folder(self):
         """Load every image in a chosen folder as pages."""
         d = QFileDialog.getExistingDirectory(
-            self, self._tr("mi_load_folder"),
-            self._folder or os.path.expanduser("~"))
+            self, self._tr("mi_load_folder"), self._start_dir())
         if not d:
             return
+        self._remember_dir(d)
         exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
         try:
             files = sorted(os.path.join(d, f) for f in os.listdir(d)
@@ -2940,10 +2956,11 @@ class TrainerWindow(QMainWindow):
 
     def on_choose_folder(self):
         path = QFileDialog.getExistingDirectory(
-            self, self._tr("choose"), self._folder or os.path.expanduser("~"))
+            self, self._tr("choose"), self._start_dir())
         if not path:
             return
         self._folder = path
+        self._remember_dir(path)
         self._save_settings()
 
     # -- optional bridge to the BubblR AI ranking tool -----------------------
@@ -2970,9 +2987,10 @@ class TrainerWindow(QMainWindow):
     def on_rank_load(self):
         """Rank a folder of raw pages with the AI tool, then load the top ones."""
         folder = QFileDialog.getExistingDirectory(
-            self, self._tr("rank_pick"), self._folder or os.path.expanduser("~"))
+            self, self._tr("rank_pick"), self._start_dir())
         if not folder:
             return
+        self._remember_dir(folder)
         ai = self._find_ai_dir()
         if not ai:
             if QMessageBox.question(
@@ -2980,7 +2998,7 @@ class TrainerWindow(QMainWindow):
                     QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
                 return
             d = QFileDialog.getExistingDirectory(
-                self, self._tr("rank_pick_ai"), os.path.expanduser("~"))
+                self, self._tr("rank_pick_ai"), self._start_dir())
             if not d or not os.path.isfile(os.path.join(d, "propose.py")):
                 self._status(self._tr("rank_no_ai"), error=True)
                 return
@@ -3135,11 +3153,12 @@ class TrainerWindow(QMainWindow):
             self._status(self._tr("exported_one").format(name=last + ".png"))
 
     def on_save_project(self):
-        start = os.path.join(self._folder or os.path.expanduser("~"), "project.json")
+        start = os.path.join(self._start_dir(), "project.json")
         path, _f = QFileDialog.getSaveFileName(
             self, self._tr("save"), start, self._tr("proj_filter"))
         if not path:
             return
+        self._remember_dir(os.path.dirname(path))
         data = {"pages": [{"path": p["path"], "name": p["name"],
                            "boxes": p["boxes"]} for p in self._pages]}
         try:
@@ -3182,10 +3201,11 @@ class TrainerWindow(QMainWindow):
 
     def on_load_project(self):
         path, _f = QFileDialog.getOpenFileName(
-            self, self._tr("load_proj"), self._folder or os.path.expanduser("~"),
+            self, self._tr("load_proj"), self._start_dir(),
             self._tr("proj_filter"))
         if not path:
             return
+        self._remember_dir(os.path.dirname(path))
         pages = self._load_pages_from(path)
         self._pages = pages
         self._cur = -1
