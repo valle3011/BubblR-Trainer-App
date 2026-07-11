@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess)
 
-VERSION = "1.9"
+VERSION = "2.0"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -137,6 +137,26 @@ LANG = {
         "rank_fail": "Ranking failed — see the AI tool for details.",
         "rank_empty": "No ranked pages were produced.",
         "rank_loaded": "Loaded the top {n} ranked page(s).",
+        "m_file": "File", "m_edit": "Edit", "m_page": "Page",
+        "m_view": "View", "m_help": "Help",
+        "mi_load": "Load images…", "mi_rank": "Rank && load…",
+        "mi_open": "Open project…", "mi_save": "Save project…",
+        "mi_folder": "Choose dataset folder…",
+        "mi_exp_page": "Export this page", "mi_exp_all": "Export all pages",
+        "mi_exit": "Exit",
+        "mi_undo": "Undo", "mi_redo": "Redo",
+        "mi_copy": "Copy box", "mi_paste": "Paste box",
+        "mi_dup": "Duplicate box", "mi_del": "Delete box",
+        "mi_bubble": "Mark as Bubble", "mi_sfx": "Mark as SFX",
+        "mi_clear_order": "Clear reading order",
+        "mi_prev": "Previous page", "mi_next": "Next page",
+        "mi_next_todo": "Next unlabelled",
+        "mi_close": "Close page", "mi_close_all": "Close all pages",
+        "mi_zoom_in": "Zoom in", "mi_zoom_out": "Zoom out",
+        "mi_fit": "Fit to window",
+        "mi_shortcuts": "Keyboard shortcuts…", "mi_about": "About…",
+        "about_text": "Make YOLO training pages for BubblR — no Krita or "
+                      "Photoshop needed.",
         "copied": "Box copied.",
         "pasted": "Box pasted.",
         "duplicated": "Box duplicated.",
@@ -265,6 +285,26 @@ LANG = {
         "rank_fail": "Ranking fehlgeschlagen — Details im AI-Tool.",
         "rank_empty": "Es wurden keine gerankten Seiten erzeugt.",
         "rank_loaded": "Top {n} gerankte Seite(n) geladen.",
+        "m_file": "Datei", "m_edit": "Bearbeiten", "m_page": "Seite",
+        "m_view": "Ansicht", "m_help": "Hilfe",
+        "mi_load": "Bilder laden…", "mi_rank": "Ranken && laden…",
+        "mi_open": "Projekt öffnen…", "mi_save": "Projekt speichern…",
+        "mi_folder": "Dataset-Ordner wählen…",
+        "mi_exp_page": "Diese Seite exportieren",
+        "mi_exp_all": "Alle Seiten exportieren", "mi_exit": "Beenden",
+        "mi_undo": "Rückgängig", "mi_redo": "Wiederherstellen",
+        "mi_copy": "Box kopieren", "mi_paste": "Box einfügen",
+        "mi_dup": "Box duplizieren", "mi_del": "Box löschen",
+        "mi_bubble": "Als Bubble markieren", "mi_sfx": "Als SFX markieren",
+        "mi_clear_order": "Lesereihenfolge löschen",
+        "mi_prev": "Vorige Seite", "mi_next": "Nächste Seite",
+        "mi_next_todo": "Nächste ungelabelte",
+        "mi_close": "Seite schließen", "mi_close_all": "Alle Seiten schließen",
+        "mi_zoom_in": "Vergrößern", "mi_zoom_out": "Verkleinern",
+        "mi_fit": "Einpassen",
+        "mi_shortcuts": "Tastenkürzel…", "mi_about": "Über…",
+        "about_text": "Erzeugt YOLO-Trainingsseiten für BubblR — ohne Krita "
+                      "oder Photoshop.",
         "copied": "Box kopiert.",
         "pasted": "Box eingefügt.",
         "duplicated": "Box dupliziert.",
@@ -1099,26 +1139,9 @@ class TrainerWindow(QMainWindow):
             except Exception:                # noqa: BLE001
                 pass
 
-        # keyboard shortcuts for fast labelling
-        QShortcut(QKeySequence.Undo, self, activated=self.undo)          # Ctrl+Z
-        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self.redo)
-        QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
-        QShortcut(QKeySequence("Ctrl+W"), self, activated=self.on_close_page)
-        QShortcut(QKeySequence("B"), self,
-                  activated=lambda: self._kbd_set_kind("bubble"))
-        QShortcut(QKeySequence("S"), self,
-                  activated=lambda: self._kbd_set_kind("sfx"))
-        QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self.on_delete)
-        QShortcut(QKeySequence(Qt.Key_Backspace), self, activated=self.on_delete)
+        # menu bar (also carries the keyboard shortcuts); Esc stays a shortcut
+        self._build_menu()
         QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self._deselect)
-        QShortcut(QKeySequence("["), self,
-                  activated=lambda: self._goto(self._cur - 1))
-        QShortcut(QKeySequence("]"), self,
-                  activated=lambda: self._goto(self._cur + 1))
-        QShortcut(QKeySequence("F1"), self, activated=self._show_shortcuts)
-        QShortcut(QKeySequence.Copy, self, activated=self.on_copy_box)   # Ctrl+C
-        QShortcut(QKeySequence.Paste, self, activated=self.on_paste_box)  # Ctrl+V
-        QShortcut(QKeySequence("Ctrl+D"), self, activated=self.on_duplicate_box)
         self._update_undo_buttons()
 
         # auto-save the session every minute for crash recovery
@@ -1174,6 +1197,84 @@ class TrainerWindow(QMainWindow):
 
     def _show_shortcuts(self):
         QMessageBox.information(self, self._tr("sh_title"), self._tr("sh_text"))
+
+    def _show_about(self):
+        QMessageBox.about(
+            self, self._tr("mi_about"),
+            "BubblR Trainer v%s\n\n%s" % (VERSION, self._tr("about_text")))
+
+    # -- menu bar --
+    def _build_menu(self):
+        self._menu_titles = []               # (menu, key) for retranslation
+        self._menu_actions = []              # (action, key)
+        spec = [
+            ("m_file", [
+                ("mi_load", self.on_load_images, None),
+                ("mi_rank", self.on_rank_load, None),
+                None,
+                ("mi_open", self.on_load_project, "Ctrl+O"),
+                ("mi_save", self.on_save_project, "Ctrl+S"),
+                None,
+                ("mi_folder", self.on_choose_folder, None),
+                ("mi_exp_page", lambda: self.on_export(False), "Ctrl+E"),
+                ("mi_exp_all", lambda: self.on_export(True), "Ctrl+Shift+E"),
+                None,
+                ("mi_exit", self.close, "Ctrl+Q"),
+            ]),
+            ("m_edit", [
+                ("mi_undo", self.undo, "Ctrl+Z"),
+                ("mi_redo", self.redo, ["Ctrl+Y", "Ctrl+Shift+Z"]),
+                None,
+                ("mi_copy", self.on_copy_box, "Ctrl+C"),
+                ("mi_paste", self.on_paste_box, "Ctrl+V"),
+                ("mi_dup", self.on_duplicate_box, "Ctrl+D"),
+                ("mi_del", self.on_delete, ["Del", "Backspace"]),
+                None,
+                ("mi_bubble", lambda: self._kbd_set_kind("bubble"), "B"),
+                ("mi_sfx", lambda: self._kbd_set_kind("sfx"), "S"),
+                None,
+                ("mi_clear_order", self.on_clear_order, None),
+            ]),
+            ("m_page", [
+                ("mi_prev", lambda: self._goto(self._cur - 1), "["),
+                ("mi_next", lambda: self._goto(self._cur + 1), "]"),
+                ("mi_next_todo", self.on_next_todo, None),
+                None,
+                ("mi_close", self.on_close_page, "Ctrl+W"),
+                ("mi_close_all", self.on_close_all, None),
+            ]),
+            ("m_view", [
+                ("mi_zoom_in", lambda: self.overlay.zoom_step(1.25), "Ctrl++"),
+                ("mi_zoom_out", lambda: self.overlay.zoom_step(1 / 1.25), "Ctrl+-"),
+                ("mi_fit", lambda: self.overlay.fit(), None),
+            ]),
+            ("m_help", [
+                ("mi_shortcuts", self._show_shortcuts, "F1"),
+                ("mi_about", self._show_about, None),
+            ]),
+        ]
+        mb = self.menuBar()
+        for mkey, items in spec:
+            menu = mb.addMenu(self._tr(mkey))
+            self._menu_titles.append((menu, mkey))
+            for item in items:
+                if item is None:
+                    menu.addSeparator()
+                    continue
+                akey, fn, sc = item
+                act = menu.addAction(self._tr(akey))
+                if isinstance(sc, (list, tuple)):
+                    act.setShortcuts([QKeySequence(s) for s in sc])
+                elif sc:
+                    act.setShortcut(QKeySequence(sc))
+                act.triggered.connect(lambda _checked=False, f=fn: f())
+                self._menu_actions.append((act, akey))
+
+    def _retranslate_menu(self):
+        for menu, key in getattr(self, "_menu_titles", []):
+            menu.setTitle(self._tr(key))
+        for act, key in getattr(self, "_menu_actions", []):
+            act.setText(self._tr(key))
 
     # -- box list panel --
     def _rebuild_box_list(self):
@@ -1363,6 +1464,7 @@ class TrainerWindow(QMainWindow):
     def _retranslate(self):
         t = self._tr
         self.setWindowTitle(t("title") + " v" + VERSION)
+        self._retranslate_menu()
         self.lbl_intro.setText(t("intro"))
         self.lbl_boxes.setText(t("boxes"))
         self.box_list.setToolTip(t("boxes_tip"))

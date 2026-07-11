@@ -78,6 +78,9 @@ just want to label images.
 5. Choose a **dataset folder** (once — can be a shared Drive folder).
 6. **Export this page** or **Export all pages**.
 
+There's a **menu bar** (File / Edit / Page / View / Help) with everything the
+buttons do, each item showing its shortcut.
+
 ### Keyboard shortcuts (press **F1** in the app for this list)
 
 | Key | Action |
