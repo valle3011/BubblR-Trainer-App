@@ -182,10 +182,17 @@ Classes: **bubble = 0**, **sfx = 1**.
   button just points you to it (it looks for the AI folder next to the app, or
   you pick it once). The ranking runs in the background; the model load makes
   the first run take a moment.
-- **Settings** (menu bar → *Settings*) opens a small window with two tabs on
-  the left: **Display** (interface language) and **Storage location** (pick the
-  dataset/export folder and see its current path). Both are stored in
-  `~/.bubblr_trainer.json`.
+- **Settings** (menu bar → *Settings*) opens a small window with tabs on the
+  left: **Display** (language, centre marker), **New boxes** (default class),
+  **Tools** (magic-wand tolerance, manga right-to-left), **Discord** (Rich
+  Presence — see below) and **Storage location** (dataset/export folder). All
+  stored in `~/.bubblr_trainer.json`.
+- **Discord Rich Presence** *(optional):* show “in BubblR Trainer” with your
+  current page/progress on your Discord profile. Create a free app at
+  *discord.com/developers/applications*, name it **BubblR Trainer**, copy its
+  **Application ID** into *Settings → Discord* and tick the box (Discord must be
+  running on the same PC). No extra install — it talks to Discord's local
+  socket from a background thread and does nothing if Discord isn't there.
 - Bilingual (English / Deutsch) — switch it under Settings → Display.
 - **Make a no-Python `.exe`:** double-click **`build_exe.bat`** (installs
   PyInstaller if needed, then builds). Result: the folder

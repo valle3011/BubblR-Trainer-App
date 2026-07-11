@@ -11,8 +11,10 @@ import copy
 import json
 import math
 import os
+import struct
 import subprocess
 import sys
+import threading
 import time
 
 from PyQt5.QtWidgets import (
@@ -22,13 +24,13 @@ from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
     QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
-    QStyle, QWidgetItem, QTabWidget, QToolBar)
+    QStyle, QWidgetItem, QTabWidget, QToolBar, QLineEdit)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.2"
+VERSION = "5.3"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -204,6 +206,15 @@ LANG = {
         "folder": "Dataset folder: {path}", "choose": "Choose folder…",
         "settings_display": "Display", "settings_tools": "Tools",
         "settings_newbox": "New boxes", "settings_storage": "Storage location",
+        "settings_discord": "Discord",
+        "discord_enable": "Show “in BubblR Trainer” on Discord",
+        "discord_id": "Discord Application ID",
+        "discord_hint": "Rich Presence needs a free Discord application. Open "
+                        "discord.com/developers/applications → New Application, "
+                        "name it “BubblR Trainer”, copy its Application ID "
+                        "(General Information) and paste it above. Optionally upload "
+                        "an art asset named “icon” under Rich Presence → "
+                        "Art Assets. Discord must be running on the same PC.",
         "settings_newbox_hint": "The class a freshly drawn box gets. You can "
                                 "still change any box later with the right-click "
                                 "menu or the B / S keys.",
@@ -401,6 +412,16 @@ LANG = {
         "folder": "Datensatz-Ordner: {path}", "choose": "Ordner wählen…",
         "settings_display": "Anzeige", "settings_tools": "Werkzeuge",
         "settings_newbox": "Neue Boxen", "settings_storage": "Speicherort",
+        "settings_discord": "Discord",
+        "discord_enable": "„in BubblR Trainer“ auf Discord anzeigen",
+        "discord_id": "Discord-Application-ID",
+        "discord_hint": "Rich Presence braucht eine kostenlose Discord-Anwendung. "
+                        "Öffne discord.com/developers/applications → New "
+                        "Application, nenne sie „BubblR Trainer“, kopiere die "
+                        "Application ID (General Information) und füge sie oben "
+                        "ein. Optional unter Rich Presence → Art Assets ein Bild "
+                        "namens „icon“ hochladen. Discord muss auf demselben PC "
+                        "laufen.",
         "settings_newbox_hint": "Die Klasse, die eine neu gezeichnete Box "
                                 "bekommt. Jede Box lässt sich später per "
                                 "Rechtsklick-Menü oder mit den Tasten B / S ändern.",
@@ -1417,6 +1438,134 @@ class PageStrip(QListWidget):
             self.setIconSize(QSize(int(h * 0.8), h))
 
 
+class DiscordPresence:
+    """Minimal Discord Rich Presence over the local IPC pipe (no dependency).
+
+    Runs entirely in a daemon thread so a slow/unresponsive Discord can never
+    freeze the UI, and silently does nothing if Discord isn't running or no
+    application id is set."""
+
+    def __init__(self, client_id, start_ts=None):
+        self.client_id = str(client_id or "")
+        self._pipe = None
+        self._start = int(start_ts or time.time())
+        self._details = "Labelling manga"
+        self._state = ""
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._thread = None
+
+    # public API (thread-safe) ------------------------------------------------
+    def start(self):
+        if not self.client_id or self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def set_status(self, details, state):
+        with self._lock:
+            self._details = details or ""
+            self._state = state or ""
+
+    def stop(self):
+        self._stop.set()
+        self._close()
+
+    # internals ---------------------------------------------------------------
+    def _ipc_paths(self):
+        if os.name == "nt":
+            return [r"\\.\pipe\discord-ipc-%d" % i for i in range(10)]
+        base = (os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR")
+                or "/tmp")
+        return [os.path.join(base, "discord-ipc-%d" % i) for i in range(10)]
+
+    def _connect(self):
+        for path in self._ipc_paths():
+            try:
+                if os.name == "nt":
+                    self._pipe = open(path, "r+b", buffering=0)
+                else:
+                    import socket
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.connect(path)
+                    self._pipe = s
+            except OSError:
+                self._pipe = None
+                continue
+            try:
+                self._send(0, {"v": 1, "client_id": self.client_id})
+                self._recv()                 # READY / error
+                return True
+            except OSError:
+                self._close()
+        return False
+
+    def _write(self, data):
+        if os.name == "nt":
+            self._pipe.write(data)
+            self._pipe.flush()
+        else:
+            self._pipe.sendall(data)
+
+    def _read(self, n):
+        out = b""
+        while len(out) < n:
+            if os.name == "nt":
+                chunk = self._pipe.read(n - len(out))
+            else:
+                chunk = self._pipe.recv(n - len(out))
+            if not chunk:
+                raise OSError("pipe closed")
+            out += chunk
+        return out
+
+    def _send(self, op, payload):
+        data = json.dumps(payload).encode("utf-8")
+        self._write(struct.pack("<II", op, len(data)) + data)
+
+    def _recv(self):
+        op, ln = struct.unpack("<II", self._read(8))
+        return self._read(ln) if ln else b""
+
+    def _push(self):
+        if not self._pipe:
+            return False
+        with self._lock:
+            details, state = self._details, self._state
+        activity = {"details": details[:128] or "Labelling manga",
+                    "timestamps": {"start": self._start},
+                    "assets": {"large_image": "icon",
+                               "large_text": "BubblR Trainer"}}
+        if state:
+            activity["state"] = state[:128]
+        try:
+            self._send(1, {"cmd": "SET_ACTIVITY",
+                           "args": {"pid": os.getpid(), "activity": activity},
+                           "nonce": "%f" % time.time()})
+            self._recv()
+            return True
+        except OSError:
+            self._close()
+            return False
+
+    def _run(self):
+        if not self._connect():
+            return
+        self._push()
+        while not self._stop.wait(15):       # refresh / keep alive
+            if not self._push() and not self._stop.is_set():
+                if not self._connect():      # Discord went away; retry later
+                    self._stop.wait(30)
+
+    def _close(self):
+        try:
+            if self._pipe:
+                self._pipe.close()
+        except OSError:
+            pass
+        self._pipe = None
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -1434,6 +1583,9 @@ class TrainerWindow(QMainWindow):
         self._auto_order = bool(cfg.get("auto_order_on", False))
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._center = bool(cfg.get("center_marker", True))  # in Settings now
+        self._discord_enabled = bool(cfg.get("discord_enabled", False))
+        self._discord_id = str(cfg.get("discord_client_id", ""))
+        self._discord = None                      # DiscordPresence when running
         self._class_filter = None                 # None | "bubble" | "sfx"
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
@@ -1632,6 +1784,7 @@ class TrainerWindow(QMainWindow):
         self._autosave_timer.start(60000)
 
         self._refresh()
+        self._start_discord()                # show "in BubblR Trainer" if enabled
 
     # -- settings / i18n --
     def _tr(self, key):
@@ -1650,7 +1803,9 @@ class TrainerWindow(QMainWindow):
                 "ai_dir": self._ai_dir, "locked": self._locked,
                 "wand_tol": self._wand_tol, "auto_order_on": self._auto_order,
                 "rtl": self._rtl, "new_kind": self._new_kind,
-                "center_marker": self._center, "last_dir": self._last_dir}
+                "center_marker": self._center, "last_dir": self._last_dir,
+                "discord_enabled": self._discord_enabled,
+                "discord_client_id": self._discord_id}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -1782,6 +1937,33 @@ class TrainerWindow(QMainWindow):
         return sum(1 for p in self._pages
                    if p["boxes"] and not p.get("exported"))
 
+    # -- Discord Rich Presence ------------------------------------------------
+    def _start_discord(self):
+        """(Re)start or stop the Discord presence to match the settings."""
+        if self._discord is not None:
+            self._discord.stop()
+            self._discord = None
+        if self._discord_enabled and self._discord_id.strip():
+            self._discord = DiscordPresence(self._discord_id.strip())
+            self._discord.start()
+            self._update_discord()
+
+    def _update_discord(self):
+        """Push the current page / progress to Discord (cheap; the presence
+        thread only sends it every ~15s)."""
+        if not self._discord:
+            return
+        n = len(self._pages)
+        if n == 0:
+            self._discord.set_status("Idle", "No pages loaded")
+            return
+        done = sum(1 for p in self._pages if p["boxes"])
+        if 0 <= self._cur < n:
+            details = "Labelling page %d/%d" % (self._cur + 1, n)
+        else:
+            details = "Labelling manga"
+        self._discord.set_status(details, "%d/%d pages done" % (done, n))
+
     def showEvent(self, event):
         super(TrainerWindow, self).showEvent(event)
         # restore the saved docker layout + sizes once the window is live, so
@@ -1832,6 +2014,8 @@ class TrainerWindow(QMainWindow):
             event.ignore()                   # let the user export/save first
             return
         self._save_settings()                # remember window size/position
+        if self._discord:                    # drop the Discord presence
+            self._discord.stop()
         try:                                 # clean exit -> no crash recovery
             os.remove(RECOVERY_FILE)
         except OSError:
@@ -2159,6 +2343,36 @@ class TrainerWindow(QMainWindow):
         tvv.addWidget(rtl_hint)
         tvv.addStretch(1)
 
+        # -- Discord page: Rich Presence toggle + application id --
+        disc = QWidget()
+        cv = QVBoxLayout(disc)
+        disc_title = QLabel()
+        disc_title.setStyleSheet("font-weight: bold;")
+        cv.addWidget(disc_title)
+        disc_box = QCheckBox()
+        disc_box.setChecked(self._discord_enabled)
+        cv.addWidget(disc_box)
+        disc_id_lbl = QLabel()
+        cv.addWidget(disc_id_lbl)
+        disc_id = QLineEdit()
+        disc_id.setText(self._discord_id)
+        disc_id.setPlaceholderText("1234567890...")
+        cv.addWidget(disc_id)
+        disc_hint = QLabel()
+        disc_hint.setWordWrap(True)
+        disc_hint.setStyleSheet("color: gray;")
+        cv.addWidget(disc_hint)
+        cv.addStretch(1)
+
+        def apply_discord():
+            self._discord_enabled = disc_box.isChecked()
+            self._discord_id = disc_id.text().strip()
+            self._save_settings()
+            self._start_discord()
+
+        disc_box.toggled.connect(lambda _on: apply_discord())
+        disc_id.editingFinished.connect(apply_discord)
+
         # -- Storage page: dataset/export folder --
         store = QWidget()
         sv = QVBoxLayout(store)
@@ -2182,6 +2396,7 @@ class TrainerWindow(QMainWindow):
         stack.addWidget(disp)
         stack.addWidget(newp)
         stack.addWidget(toolsp)
+        stack.addWidget(disc)
         stack.addWidget(store)
         nav.currentRowChanged.connect(stack.setCurrentIndex)
 
@@ -2194,6 +2409,7 @@ class TrainerWindow(QMainWindow):
             nav.addItem(tr("settings_display"))
             nav.addItem(tr("settings_newbox"))
             nav.addItem(tr("settings_tools"))
+            nav.addItem(tr("settings_discord"))
             nav.addItem(tr("settings_storage"))
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
@@ -2209,6 +2425,10 @@ class TrainerWindow(QMainWindow):
             wand_hint.setText(tr("wand_tol_tip"))
             rtl_box.setText(tr("rtl"))
             rtl_hint.setText(tr("rtl_tip"))
+            disc_title.setText(tr("settings_discord"))
+            disc_box.setText(tr("discord_enable"))
+            disc_id_lbl.setText(tr("discord_id"))
+            disc_hint.setText(tr("discord_hint"))
             store_title.setText(tr("settings_folder_title"))
             choose_btn.setText(tr("mi_folder"))
             path_lbl.setText(self._folder or tr("settings_folder_none"))
@@ -2548,6 +2768,7 @@ class TrainerWindow(QMainWindow):
         if hasattr(self, "box_list"):
             self._rebuild_box_list()
         self._sync_page_strip()
+        self._update_discord()
 
     def _set_kind(self, kind):
         self._new_kind = kind
