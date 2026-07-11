@@ -19,8 +19,13 @@ if errorlevel 1 (
 
 rem --onedir = Ordner-Version: startet am schnellsten (kein Entpacken).
 rem Fuer eine Einzeldatei stattdessen --onefile setzen (startet etwas langsamer).
+rem --icon setzt das Programm-Icon; --add-data buendelt es fuers Fenster-Icon.
 echo Baue BubblR-Trainer (onedir) ...
-python -m PyInstaller --onedir --windowed --name "BubblR-Trainer" --noconfirm --clean bubblr_trainer_app.py
+python -m PyInstaller --onedir --windowed --name "BubblR-Trainer" --noconfirm --clean ^
+  --icon "assets/icon.ico" ^
+  --add-data "assets/icon.ico;assets" ^
+  --add-data "assets/icon.png;assets" ^
+  bubblr_trainer_app.py
 if errorlevel 1 (
   echo [FEHLER] Build fehlgeschlagen.
   pause

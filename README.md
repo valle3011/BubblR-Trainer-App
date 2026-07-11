@@ -11,6 +11,9 @@ just want to label images.
   — no Python or PyQt5 install needed. It's a folder build (fastest start, no
   unpacking) — keep the `BubblR-Trainer` folder together and run the `.exe`
   inside it. Build it yourself with **`build_exe.bat`** (see Notes).
+  - **Desktop shortcut:** run **`make_shortcut.bat`** to drop a *BubblR Trainer*
+    shortcut (with the app icon) on your Desktop, so you don't have to open the
+    folder each time.
 - **Windows (with Python):** double-click **`run.bat`** — installs PyQt5 the
   first time, then starts the app.
 - **Any OS / manually:**

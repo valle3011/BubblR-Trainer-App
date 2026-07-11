@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QButtonGroup, QFileDialog, QComboBox,
     QMessageBox, QCheckBox, QSpinBox, QShortcut)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
-                         QPalette, QPolygonF, QKeySequence)
+                         QPalette, QPolygonF, QKeySequence, QIcon)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPoint, QPointF
 
 VERSION = "1.4"
@@ -1534,10 +1534,28 @@ def apply_krita_dark(app):
         "QLabel{color:#eff0f1;}")
 
 
+def _resource(*parts):
+    """Path to a bundled resource, both when run as a .py and as a PyInstaller
+    exe (which unpacks data under sys._MEIPASS)."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+
+def app_icon():
+    """The BubblR speech-bubble icon, if the asset is present."""
+    for name in ("icon.ico", "icon.png"):
+        p = _resource("assets", name)
+        if os.path.exists(p):
+            return QIcon(p)
+    return QIcon()
+
+
 def main():
     app = QApplication(sys.argv)
     apply_krita_dark(app)
+    app.setWindowIcon(app_icon())           # taskbar / window / alt-tab icon
     win = TrainerWindow()
+    win.setWindowIcon(app_icon())
     win.show()
     # image paths passed on the command line open straight away as pages
     # (used by "Open in BubblR Trainer" in the BubblR AI ranking tool)
