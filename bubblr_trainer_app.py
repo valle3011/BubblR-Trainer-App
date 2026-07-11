@@ -22,13 +22,13 @@ from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
     QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
-    QStyle, QWidgetItem)
+    QStyle, QWidgetItem, QTabWidget)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.1"
+VERSION = "4.2"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -203,6 +203,7 @@ LANG = {
         "settings_unlock_hint": "When on, drag a panel by its title bar to move, "
                                 "dock or float it. Turn off to lock the layout.",
         "dock_tools": "Tools", "dock_boxes": "Boxes", "dock_pages": "Pages",
+        "mi_lock_panels": "Lock panels",
         "export_page": "Export this page", "export_all": "Export all pages",
         "ready": "Load page images to begin.",
         "loaded": "{n} image(s) loaded.",
@@ -387,6 +388,7 @@ LANG = {
                                 "ziehen zum Verschieben, Andocken oder Lösen. "
                                 "Ausschalten sperrt das Layout.",
         "dock_tools": "Werkzeuge", "dock_boxes": "Boxen", "dock_pages": "Seiten",
+        "mi_lock_panels": "Panels sperren",
         "export_page": "Diese Seite exportieren", "export_all": "Alle Seiten exportieren",
         "ready": "Zum Start Seitenbilder laden.",
         "loaded": "{n} Bild(er) geladen.",
@@ -1331,6 +1333,34 @@ def make_tool_icon(kind, size=24):
     return QIcon(pm)
 
 
+class PageStrip(QListWidget):
+    """Thumbnail list whose icon size follows the panel size, so pages grow
+    when you enlarge the dock, and that flips between a row (top/bottom) and a
+    column (left/right) depending on which side it is docked on."""
+
+    def __init__(self):
+        super(PageStrip, self).__init__()
+        self._vertical = False
+        self.setResizeMode(QListWidget.Adjust)
+
+    def set_vertical(self, vertical):
+        self._vertical = bool(vertical)
+        self._resize_icons()
+
+    def resizeEvent(self, ev):
+        super(PageStrip, self).resizeEvent(ev)
+        self._resize_icons()
+
+    def _resize_icons(self):
+        vp = self.viewport().size()
+        if self._vertical:                       # column: width follows the dock
+            w = max(56, min(220, vp.width() - 16))
+            self.setIconSize(QSize(w, int(w * 1.3)))
+        else:                                    # row: height follows the dock
+            h = max(56, min(260, vp.height() - 16))
+            self.setIconSize(QSize(int(h * 0.8), h))
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -1342,7 +1372,7 @@ class TrainerWindow(QMainWindow):
         self._lang = cfg.get("lang", "en")
         self._folder = cfg.get("folder", "")
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
-        self._locked = cfg.get("locked", True)   # panels locked (Krita-style)
+        self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
         self._new_kind = "bubble"
@@ -1426,12 +1456,12 @@ class TrainerWindow(QMainWindow):
         self.box_list.customContextMenuRequested.connect(self._on_box_list_context)
 
         # --- Page thumbnails (docker; flow flips to vertical on a side dock) ---
-        self.page_strip = QListWidget()
+        self.page_strip = PageStrip()
         self.page_strip.setViewMode(QListWidget.IconMode)
         self.page_strip.setFlow(QListWidget.LeftToRight)
         self.page_strip.setWrapping(False)
         self.page_strip.setMovement(QListWidget.Static)
-        self.page_strip.setIconSize(QSize(78, 88))
+        self.page_strip.setIconSize(QSize(88, 112))
         self.page_strip.setSpacing(4)
         self.page_strip.setToolTip(self._tr("strip_tip"))
         self.page_strip.currentRowChanged.connect(self._on_page_strip_row)
@@ -1673,31 +1703,36 @@ class TrainerWindow(QMainWindow):
 
         self._docks = [self.tools_dock, self.boxes_dock, self.thumbs_dock]
         for d in self._docks:
-            d.setAllowedAreas(Qt.AllDockWidgetAreas)
+            d.setAllowedAreas(Qt.AllDockWidgetAreas)   # left, right, top, bottom
+        # when two panels stack in one area, show their tabs at the top
+        self.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
+        # let the left/right docks own the full height (corners), like Krita
+        self.setCorner(Qt.TopLeftCorner, Qt.LeftDockWidgetArea)
+        self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
+        self.setCorner(Qt.TopRightCorner, Qt.RightDockWidgetArea)
+        self.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)
         self._apply_thumbs_flow(Qt.BottomDockWidgetArea)
         self._apply_dock_lock()
 
     def _apply_thumbs_flow(self, area):
-        """Thumbnails run in a row on the top/bottom, in a column on the sides."""
+        """Thumbnails run in a row on the top/bottom, in a column on the sides.
+        No maximum size, so you can enlarge the dock freely and the thumbnails
+        grow with it (PageStrip scales its icons to the panel)."""
         vertical = area in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea)
         s = self.page_strip
-        BIG = 16777215
         if vertical:
             s.setFlow(QListWidget.TopToBottom)
             s.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             s.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             s.setMinimumHeight(0)
-            s.setMaximumHeight(BIG)
-            s.setMinimumWidth(96)
-            s.setMaximumWidth(150)
+            s.setMinimumWidth(72)
         else:
             s.setFlow(QListWidget.LeftToRight)
             s.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             s.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             s.setMinimumWidth(0)
-            s.setMaximumWidth(BIG)
-            s.setMinimumHeight(104)
-            s.setMaximumHeight(140)
+            s.setMinimumHeight(80)
+        s.set_vertical(vertical)
 
     def _apply_dock_lock(self):
         """Locked = titles stay but panels can't be dragged/floated; unlocked =
@@ -1900,6 +1935,8 @@ class TrainerWindow(QMainWindow):
                 ("mi_zoom_out", lambda: self.overlay.zoom_step(1 / 1.25), "Ctrl+-"),
                 ("mi_zoom_sel", self.on_zoom_selection, "Z"),
                 ("mi_fit", lambda: self.overlay.fit(), None),
+                None,
+                ("mi_lock_panels", "__lock__", None),
             ]),
             ("m_settings", self._open_settings),   # opens the Settings window
             ("m_help", [
@@ -1921,6 +1958,14 @@ class TrainerWindow(QMainWindow):
                     menu.addSeparator()
                     continue
                 akey, fn, sc = item
+                if fn == "__lock__":              # checkable "Lock panels" toggle
+                    act = menu.addAction(self._tr(akey))
+                    act.setCheckable(True)
+                    act.setChecked(self._locked)
+                    act.toggled.connect(self.set_layout_locked)
+                    self.lock_action = act
+                    self._menu_actions.append((act, akey))
+                    continue
                 act = menu.addAction(self._tr(akey))
                 if isinstance(sc, (list, tuple)):
                     act.setShortcuts([QKeySequence(s) for s in sc])
@@ -1953,18 +1998,6 @@ class TrainerWindow(QMainWindow):
         rb_de.setChecked(self._lang == "de")
         dv.addWidget(rb_en)
         dv.addWidget(rb_de)
-        dv.addSpacing(14)
-        layout_title = QLabel()
-        layout_title.setStyleSheet("font-weight: bold;")
-        dv.addWidget(layout_title)
-        unlock_chk = QCheckBox()
-        unlock_chk.setChecked(not self._locked)
-        unlock_chk.toggled.connect(lambda on: self.set_layout_locked(not on))
-        dv.addWidget(unlock_chk)
-        unlock_hint = QLabel()
-        unlock_hint.setWordWrap(True)
-        unlock_hint.setStyleSheet("color: gray;")
-        dv.addWidget(unlock_hint)
         dv.addStretch(1)
 
         # -- Storage page: dataset/export folder --
@@ -2002,9 +2035,6 @@ class TrainerWindow(QMainWindow):
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
             lang_title.setText(tr("mi_language"))
-            layout_title.setText(tr("settings_layout"))
-            unlock_chk.setText(tr("settings_unlock"))
-            unlock_hint.setText(tr("settings_unlock_hint"))
             store_title.setText(tr("settings_folder_title"))
             choose_btn.setText(tr("mi_folder"))
             path_lbl.setText(self._folder or tr("settings_folder_none"))
@@ -2099,7 +2129,9 @@ class TrainerWindow(QMainWindow):
     def _page_thumb(self, pg):
         px = pg.get("thumb")
         if px is None:
-            scaled = pg["img"].scaled(QSize(78, 88), Qt.KeepAspectRatio,
+            # cache at a generous size so the thumbnails stay crisp when the
+            # Pages dock is enlarged (the view scales this down for small icons)
+            scaled = pg["img"].scaled(QSize(240, 300), Qt.KeepAspectRatio,
                                       Qt.SmoothTransformation)
             px = QPixmap.fromImage(scaled)
             pg["thumb"] = px
@@ -3083,11 +3115,16 @@ def apply_krita_dark(app):
         "QProgressBar{background:#232629;border:1px solid #4d4d4d;"
         "border-radius:3px;text-align:center;color:#eff0f1;}"
         "QProgressBar::chunk{background:#3daee9;border-radius:2px;}"
-        # dockable panels (Tools / Boxes / Pages)
-        "QDockWidget{color:#eff0f1;titlebar-close-icon:none;}"
-        "QDockWidget::title{background:#31363b;padding:4px 8px;"
+        # dockable panels (Tools / Boxes / Pages) — medium-height headers
+        "QDockWidget{color:#eff0f1;font-weight:bold;}"
+        "QDockWidget::title{background:#31363b;padding:6px 10px;"
+        "border-bottom:1px solid #4d4d4d;}"
+        "QDockWidget::close-button,QDockWidget::float-button{"
+        "subcontrol-position:top right;padding:2px;}"
+        "QTabBar::tab{background:#31363b;color:#eff0f1;padding:5px 12px;"
         "border:1px solid #4d4d4d;}"
-        "QMainWindow::separator{background:#31363b;width:4px;height:4px;}")
+        "QTabBar::tab:selected{background:#3daee9;color:#ffffff;}"
+        "QMainWindow::separator{background:#31363b;width:5px;height:5px;}")
 
 
 def _resource(*parts):

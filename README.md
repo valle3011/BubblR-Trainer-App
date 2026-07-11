@@ -111,11 +111,13 @@ buttons do, each item showing its shortcut.
 
 - **Dockable panels (Krita-style):** the **Tools** (icon-only marking tools +
   wand tolerance), **Boxes** and **Pages** (thumbnails) panels are dock widgets
-  you can rearrange around the canvas. The layout is **locked by default** —
-  tick *Settings → Display → Unlock panels* to drag them by their title bar to
-  any edge or float them (like TypeR); untick to lock again. The thumbnail
-  panel **reflows automatically**: a row of thumbnails on the top/bottom, a
-  column when docked to the left/right. Positions are remembered between runs.
+  you can rearrange around the canvas — drag them by their title bar to any
+  edge (**left, right, top or bottom**) or float them. When two panels share an
+  edge they **tab together with the tabs on top**. Turn *View → Lock panels* on
+  to freeze the layout so nothing moves by accident; off again to rearrange.
+  The **Pages** panel adapts automatically: a row of thumbnails on the
+  top/bottom, a column on the left/right, and the thumbnails **grow as you
+  enlarge the panel**. All positions are remembered between runs.
 - A **page thumbnail strip** lets you jump to any page with a
   click. Each thumbnail shows its status: **✓** = exported to the dataset,
   **•** = has boxes but not exported yet, nothing = still empty (editing an
