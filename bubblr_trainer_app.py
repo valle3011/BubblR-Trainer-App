@@ -25,7 +25,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "2.6"
+VERSION = "2.7"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -147,7 +147,9 @@ LANG = {
         "m_file": "File", "m_edit": "Edit", "m_page": "Page",
         "m_view": "View", "m_settings": "Settings", "m_help": "Help",
         "mi_language": "Language",
-        "mi_load": "Load images…", "mi_rank": "Rank && load…",
+        "mi_load": "Load images…", "mi_load_folder": "Load folder…",
+        "mi_rank": "Rank && load… (needs BubblR AI)",
+        "no_imgs_folder": "No images in that folder.",
         "mi_open": "Open project…", "mi_save": "Save project…",
         "mi_folder": "Choose dataset folder…",
         "mi_exp_page": "Export this page", "mi_exp_all": "Export all pages",
@@ -304,7 +306,9 @@ LANG = {
         "m_file": "Datei", "m_edit": "Bearbeiten", "m_page": "Seite",
         "m_view": "Ansicht", "m_settings": "Einstellungen", "m_help": "Hilfe",
         "mi_language": "Sprache",
-        "mi_load": "Bilder laden…", "mi_rank": "Ranken && laden…",
+        "mi_load": "Bilder laden…", "mi_load_folder": "Ordner laden…",
+        "mi_rank": "Ranken && laden… (braucht BubblR AI)",
+        "no_imgs_folder": "Keine Bilder in dem Ordner.",
         "mi_open": "Projekt öffnen…", "mi_save": "Projekt speichern…",
         "mi_folder": "Dataset-Ordner wählen…",
         "mi_exp_page": "Diese Seite exportieren",
@@ -1224,14 +1228,10 @@ class TrainerWindow(QMainWindow):
         io_row.addWidget(self.loadp_btn)
         lay.addLayout(io_row)
 
-        fold_row = QHBoxLayout()
+        # dataset/export folder is chosen via Settings; here we just show it
         self.folder_lbl = QLabel("")
         self.folder_lbl.setWordWrap(True)
-        fold_row.addWidget(self.folder_lbl, 1)
-        self.folder_btn = QPushButton(self._tr("choose"))
-        self.folder_btn.clicked.connect(self.on_choose_folder)
-        fold_row.addWidget(self.folder_btn)
-        lay.addLayout(fold_row)
+        lay.addWidget(self.folder_lbl)
 
         exp_row = QHBoxLayout()
         self.exp_page_btn = QPushButton(self._tr("export_page"))
@@ -1364,6 +1364,7 @@ class TrainerWindow(QMainWindow):
         spec = [
             ("m_file", [
                 ("mi_load", self.on_load_images, None),
+                ("mi_load_folder", self.on_load_folder, None),
                 ("mi_rank", self.on_rank_load, None),
                 None,
                 ("mi_open", self.on_load_project, "Ctrl+O"),
@@ -1717,7 +1718,6 @@ class TrainerWindow(QMainWindow):
         self.lbl_relabel.setText(t("relabel"))
         self.save_btn.setText(t("save"))
         self.loadp_btn.setText(t("load_proj"))
-        self.folder_btn.setText(t("choose"))
         self.exp_page_btn.setText(t("export_page"))
         self.exp_all_btn.setText(t("export_all"))
         self._refresh_folder_label()
@@ -2080,6 +2080,24 @@ class TrainerWindow(QMainWindow):
             self._tr("img_filter"))
         if paths:
             self.add_image_paths(paths)
+
+    def on_load_folder(self):
+        """Load every image in a chosen folder as pages."""
+        d = QFileDialog.getExistingDirectory(
+            self, self._tr("mi_load_folder"),
+            self._folder or os.path.expanduser("~"))
+        if not d:
+            return
+        exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+        try:
+            files = sorted(os.path.join(d, f) for f in os.listdir(d)
+                           if f.lower().endswith(exts))
+        except OSError:
+            files = []
+        if files:
+            self.add_image_paths(files)
+        else:
+            self._status(self._tr("no_imgs_folder"), error=True)
 
     def add_image_paths(self, paths):
         """Load the given image files as pages (used by the file dialog and by
