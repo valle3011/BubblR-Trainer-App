@@ -46,12 +46,13 @@ just want to label images.
      **Page → Next unexported** jumps to the next labelled-but-not-yet-exported
      page; the counter shows how many pages are labelled and exported (e.g.
      `12/20 labelled, 8 exported`).
-2. Turn on **Draw / edit boxes**:
+2. **Pick a marking tool** (in the **Tools** panel) — that alone puts you in
+   draw mode, no separate button:
    - drag on empty space = new box,
    - drag inside a box = move,
    - drag a **corner or edge** = resize (the cursor shows what you'll grab),
    - right-click a box (or a row in the Boxes list) = **context menu**
-     (delete, duplicate, fit to bubble, mark as Bubble/SFX),
+     (delete, duplicate, fit to bubble, **mark as Bubble/SFX**),
    - right-click **empty space** = canvas menu (**paste a box right where you
      clicked**, select all, deselect, fit to window).
 
@@ -59,7 +60,7 @@ just want to label images.
    to select it, then editing stays on that box instead of grabbing whatever
    overlaps it.
 
-   Pick a **marking tool** (choosing one also turns drawing on):
+   The tools (icon-only, Krita-style):
    - **▭ Rectangle** — the classic corner-to-corner box.
    - **◯ Ellipse** — drag an oval (nice for round bubbles); the saved box is its
      bounding rectangle.
@@ -76,20 +77,23 @@ just want to label images.
    still exports as a normal YOLO bounding box, so the dataset format never
    changes.
 
-   **Undo / Redo:** made a mistake? **↶ Undo** (**Ctrl+Z**) steps back through
-   adds, moves, resizes, deletes, relabels and ordering changes; **↷ Redo**
-   (**Ctrl+Y** or **Ctrl+Shift+Z**) reapplies them.
-3. Pick the class with **Bubble** (red) / **SFX** (blue). Click an existing box
-   first, then a class button, to relabel it.
-4. *(optional)* **Set reading order** → click the bubbles in reading order
-   (1, 2, 3 …); the badge shows the number, **Clear order** restarts.
+   **Undo / Redo** (**Ctrl+Z** / **Ctrl+Y**, also in the Edit menu) step through
+   adds, moves, resizes, deletes, relabels and ordering changes.
+3. Set the **class** per box: a new box starts as **Bubble**; **right-click →
+   SFX** (or press **B** / **S**) to change it. Colours: Bubble = red,
+   SFX = blue.
+4. *(optional)* **Set reading order** (button, top row) → click the bubbles in
+   order (1, 2, 3 …), or **Auto order** (top row) to number them automatically.
+   *Edit → Clear reading order* restarts. Manga right-to-left is set under
+   *Settings → Tools*.
 5. Choose a **dataset folder** (once — can be a shared Drive folder).
-6. **Export this page** or **Export all pages**.
+6. **File → Export this page / Export all pages** (**Ctrl+E** / **Ctrl+Shift+E**).
 
-The main actions (undo/redo, draw, set/auto order, delete, class, export) sit in
-a **movable Actions toolbar** so the canvas gets the vertical space. Above it a
-small row has a **Show** filter (All / Bubbles only / SFX only — hides the other
-class on the canvas and dims it in the Boxes list) and an **Auto order** toggle
+The canvas fills the window — undo/redo, delete, clear, class and export live in
+the **Edit / File menus** and the **right-click menu** rather than button rows.
+A small row under the canvas has a **Show** filter (All / Bubbles only / SFX
+only — hides the other class on the canvas and dims it in the Boxes list) and an
+**Auto order** toggle
 that re-numbers the reading order automatically after every add/move/delete.
 
 There's a **menu bar** (File / Edit / Page / View / Settings / Help) with

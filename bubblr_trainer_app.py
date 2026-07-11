@@ -28,7 +28,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "4.5"
+VERSION = "4.6"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1414,6 +1414,7 @@ class TrainerWindow(QMainWindow):
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._auto_order = bool(cfg.get("auto_order_on", False))
+        self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._class_filter = None                 # None | "bubble" | "sfx"
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
@@ -1442,6 +1443,16 @@ class TrainerWindow(QMainWindow):
         self.next_todo_btn = QPushButton(self._tr("next_todo"))
         self.next_todo_btn.clicked.connect(self.on_next_todo)
         top.addWidget(self.next_todo_btn)
+        top.addSpacing(12)
+        # reading-order controls live up here now (next to Next unlabelled)
+        self.order_btn = QPushButton(self._tr("set_order"))
+        self.order_btn.setCheckable(True)
+        self.order_btn.toggled.connect(self._on_order_toggle)
+        top.addWidget(self.order_btn)
+        self.auto_order_btn = QPushButton(self._tr("auto_order"))
+        self.auto_order_btn.setToolTip(self._tr("auto_order_tip"))
+        self.auto_order_btn.clicked.connect(self.on_auto_order)
+        top.addWidget(self.auto_order_btn)
         top.addStretch(1)
         self.prev_btn = QPushButton(self._tr("prev"))
         self.prev_btn.clicked.connect(lambda: self._goto(self._cur - 1))
@@ -1532,6 +1543,7 @@ class TrainerWindow(QMainWindow):
         # wand tolerance is now set in the Settings window (keeps the Tools dock
         # small); apply the saved value to the overlay
         self.overlay.set_wand_tolerance(self._wand_tol)
+        self.overlay.set_edit_mode(True)   # a tool is always ready to draw
 
         self._build_docks()
 
@@ -1563,81 +1575,13 @@ class TrainerWindow(QMainWindow):
         opt_row.addStretch(1)
         lay.addLayout(opt_row)
 
-        # Actions live in a movable toolbar (frees vertical space for the canvas)
-        bar = QToolBar(self._tr("bar_actions"))
-        bar.setObjectName("actionBar")
-        bar.setMovable(True)
-        bar.setFloatable(True)
-        self.action_bar = bar
-        self.addToolBar(Qt.BottomToolBarArea, bar)
-        self.undo_btn = QPushButton(self._tr("undo"))
-        self.undo_btn.setToolTip(self._tr("undo_tip"))
-        self.undo_btn.clicked.connect(self.undo)
-        bar.addWidget(self.undo_btn)
-        self.redo_btn = QPushButton(self._tr("redo"))
-        self.redo_btn.setToolTip(self._tr("redo_tip"))
-        self.redo_btn.clicked.connect(self.redo)
-        bar.addWidget(self.redo_btn)
-        bar.addSeparator()
-        self.edit_btn = QPushButton(self._tr("edit"))
-        self.edit_btn.setCheckable(True)
-        self.edit_btn.toggled.connect(self._on_edit_toggle)
-        bar.addWidget(self.edit_btn)
-        self.order_btn = QPushButton(self._tr("set_order"))
-        self.order_btn.setCheckable(True)
-        self.order_btn.toggled.connect(self._on_order_toggle)
-        bar.addWidget(self.order_btn)
-        self.auto_order_btn = QPushButton(self._tr("auto_order"))
-        self.auto_order_btn.setToolTip(self._tr("auto_order_tip"))
-        self.auto_order_btn.clicked.connect(self.on_auto_order)
-        bar.addWidget(self.auto_order_btn)
-        self.rtl_chk = QCheckBox(self._tr("rtl"))
-        self.rtl_chk.setChecked(True)
-        self.rtl_chk.setToolTip(self._tr("rtl_tip"))
-        bar.addWidget(self.rtl_chk)
-        bar.addSeparator()
-        self.del_btn = QPushButton(self._tr("delete"))
-        self.del_btn.clicked.connect(self.on_delete)
-        bar.addWidget(self.del_btn)
-        self.clear_order_btn = QPushButton(self._tr("clear_order"))
-        self.clear_order_btn.clicked.connect(self.on_clear_order)
-        bar.addWidget(self.clear_order_btn)
-        self.clear_btn = QPushButton(self._tr("clear"))
-        self.clear_btn.clicked.connect(self.on_clear)
-        bar.addWidget(self.clear_btn)
-        bar.addSeparator()
-        self.lbl_kind = QLabel(self._tr("kind") + " ")
-        bar.addWidget(self.lbl_kind)
-        self._kg = QButtonGroup(self)
-        self._kg.setExclusive(True)
-        self.bubble_btn = QPushButton(self._tr("bubble"))
-        self.bubble_btn.setCheckable(True)
-        self.bubble_btn.setChecked(True)
-        self.bubble_btn.clicked.connect(lambda: self._set_kind("bubble"))
-        self.sfx_btn = QPushButton(self._tr("sfx"))
-        self.sfx_btn.setCheckable(True)
-        self.sfx_btn.clicked.connect(lambda: self._set_kind("sfx"))
-        self._kg.addButton(self.bubble_btn)
-        self._kg.addButton(self.sfx_btn)
-        self.bubble_btn.setStyleSheet("QPushButton:checked{background:#e63c3c;color:white;}")
-        self.sfx_btn.setStyleSheet("QPushButton:checked{background:#4682e6;color:white;}")
-        bar.addWidget(self.bubble_btn)
-        bar.addWidget(self.sfx_btn)
-        bar.addSeparator()
-        self.exp_page_btn = QPushButton(self._tr("export_page"))
-        self.exp_page_btn.clicked.connect(lambda: self.on_export(False))
-        bar.addWidget(self.exp_page_btn)
-        self.exp_all_btn = QPushButton(self._tr("export_all"))
-        self.exp_all_btn.clicked.connect(lambda: self.on_export(True))
-        bar.addWidget(self.exp_all_btn)
-
+        # Undo/redo, delete, clear, class and export are all reachable from the
+        # Edit / File menus (and the right-click menu); no button clutter here.
         self.lbl_relabel = QLabel(self._tr("relabel"))
         self.lbl_relabel.setStyleSheet("color: gray;")
         lay.addWidget(self.lbl_relabel)
         self.lbl_counts = QLabel("")
         lay.addWidget(self.lbl_counts)
-        # Actions (edit/order/delete/class/export) live in the toolbar above;
-        # Save / Load project live in the File menu (Ctrl+S / Ctrl+O)
 
         self.lbl_intro = QLabel(self._tr("intro"))
         self.lbl_intro.setWordWrap(True)
@@ -1696,7 +1640,8 @@ class TrainerWindow(QMainWindow):
     def _save_settings(self):
         data = {"lang": self._lang, "folder": self._folder,
                 "ai_dir": self._ai_dir, "locked": self._locked,
-                "wand_tol": self._wand_tol, "auto_order_on": self._auto_order}
+                "wand_tol": self._wand_tol, "auto_order_on": self._auto_order,
+                "rtl": self._rtl}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -1782,10 +1727,6 @@ class TrainerWindow(QMainWindow):
             else:
                 d.setFeatures(QDockWidget.DockWidgetMovable
                               | QDockWidget.DockWidgetFloatable)
-        bar = getattr(self, "action_bar", None)
-        if bar is not None:                       # the actions toolbar too
-            bar.setMovable(not self._locked)
-            bar.setFloatable(not self._locked)
 
     def set_layout_locked(self, locked):
         self._locked = bool(locked)
@@ -1814,7 +1755,7 @@ class TrainerWindow(QMainWindow):
             return
         pg = self._page()
         if pg and pg["boxes"]:
-            auto_order(pg["boxes"], rtl=self.rtl_chk.isChecked())
+            auto_order(pg["boxes"], rtl=self._rtl)
 
     def _unexported_count(self):
         """Pages that have boxes but have not been exported into the dataset."""
@@ -1988,6 +1929,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_sfx", lambda: self._kbd_set_kind("sfx"), "S"),
                 None,
                 ("mi_clear_order", self.on_clear_order, None),
+                ("clear", self.on_clear, None),
             ]),
             ("m_page", [
                 ("mi_prev", lambda: self._goto(self._cur - 1), "["),
@@ -2095,6 +2037,20 @@ class TrainerWindow(QMainWindow):
         wand_hint.setWordWrap(True)
         wand_hint.setStyleSheet("color: gray;")
         tvv.addWidget(wand_hint)
+        tvv.addSpacing(14)
+        rtl_box = QCheckBox()
+        rtl_box.setChecked(self._rtl)
+
+        def on_rtl(on):
+            self._rtl = bool(on)
+            self._save_settings()
+
+        rtl_box.toggled.connect(on_rtl)
+        tvv.addWidget(rtl_box)
+        rtl_hint = QLabel()
+        rtl_hint.setWordWrap(True)
+        rtl_hint.setStyleSheet("color: gray;")
+        tvv.addWidget(rtl_hint)
         tvv.addStretch(1)
 
         # -- Storage page: dataset/export folder --
@@ -2137,6 +2093,8 @@ class TrainerWindow(QMainWindow):
             wand_title.setText(tr("settings_tools"))
             wand_lbl.setText(tr("wand_tol"))
             wand_hint.setText(tr("wand_tol_tip"))
+            rtl_box.setText(tr("rtl"))
+            rtl_hint.setText(tr("rtl_tip"))
             store_title.setText(tr("settings_folder_title"))
             choose_btn.setText(tr("mi_folder"))
             path_lbl.setText(self._folder or tr("settings_folder_none"))
@@ -2425,17 +2383,12 @@ class TrainerWindow(QMainWindow):
             self.filter_combo.setItemText(i, t("show_" + _fk))
         self.auto_chk.setText(t("auto_order_live"))
         self.auto_chk.setToolTip(t("auto_order_live_tip"))
-        self.action_bar.setWindowTitle(t("bar_actions"))
         for _k, _btn in self.tool_btns.items():
             _btn.setToolTip(t("tool_" + _k + "_hint"))
         self.center_chk.setText(t("center_marker"))
         self.center_chk.setToolTip(t("center_marker_tip"))
         self.path_chk.setText(t("order_path"))
         self.path_chk.setToolTip(t("order_path_tip"))
-        self.undo_btn.setText(t("undo"))
-        self.undo_btn.setToolTip(t("undo_tip"))
-        self.redo_btn.setText(t("redo"))
-        self.redo_btn.setToolTip(t("redo_tip"))
         self.prev_btn.setText(t("prev"))
         self.next_btn.setText(t("next"))
         self.close_btn.setText(t("close_page"))
@@ -2444,21 +2397,10 @@ class TrainerWindow(QMainWindow):
         self.close_all_btn.setToolTip(t("close_all_tip"))
         self.zoom_fit_btn.setText(t("fit"))
         self.zoom_fit_btn.setToolTip(t("zoom_tip"))
-        self.edit_btn.setText(t("edit"))
         self.order_btn.setText(t("set_order"))
         self.auto_order_btn.setText(t("auto_order"))
         self.auto_order_btn.setToolTip(t("auto_order_tip"))
-        self.rtl_chk.setText(t("rtl"))
-        self.rtl_chk.setToolTip(t("rtl_tip"))
-        self.del_btn.setText(t("delete"))
-        self.clear_order_btn.setText(t("clear_order"))
-        self.clear_btn.setText(t("clear"))
-        self.lbl_kind.setText(t("kind"))
-        self.bubble_btn.setText(t("bubble"))
-        self.sfx_btn.setText(t("sfx"))
         self.lbl_relabel.setText(t("relabel"))
-        self.exp_page_btn.setText(t("export_page"))
-        self.exp_all_btn.setText(t("export_all"))
         self._refresh()
 
     # -- helpers --
@@ -2512,8 +2454,8 @@ class TrainerWindow(QMainWindow):
             self._refresh()
 
     def _set_kind_buttons(self, kind):
-        self.bubble_btn.setChecked(kind != "sfx")
-        self.sfx_btn.setChecked(kind == "sfx")
+        # class is chosen via the right-click menu / B & S keys now (no buttons)
+        pass
 
     # -- undo / redo --
     def _push_undo(self):
@@ -2557,9 +2499,12 @@ class TrainerWindow(QMainWindow):
         self._update_undo_buttons()
 
     def _update_undo_buttons(self):
-        if hasattr(self, "undo_btn"):
-            self.undo_btn.setEnabled(bool(self._undo))
-            self.redo_btn.setEnabled(bool(self._redo))
+        # enable/disable the Edit-menu Undo/Redo actions to match the stacks
+        for act, key in getattr(self, "_menu_actions", []):
+            if key == "mi_undo":
+                act.setEnabled(bool(self._undo))
+            elif key == "mi_redo":
+                act.setEnabled(bool(self._redo))
 
     def undo(self):
         if not self._undo:
@@ -2769,23 +2714,19 @@ class TrainerWindow(QMainWindow):
             self._new_kind = kind
         self._refresh()
 
-    def _on_edit_toggle(self, on):
-        if on and self.order_btn.isChecked():
-            self.order_btn.setChecked(False)
-        self.overlay.set_edit_mode(bool(on))
-
     def _on_tool(self, key):
+        # picking a marking tool leaves reading-order mode and is ready to draw
+        if self.order_btn.isChecked():
+            self.order_btn.setChecked(False)      # fires _on_order_toggle(False)
         self.overlay.set_tool(key)
-        # picking a marking tool implies you want to draw
-        if not self.edit_btn.isChecked():
-            self.edit_btn.setChecked(True)
+        self.overlay.set_edit_mode(True)
         self._status(self._tr("tool_" + key + "_hint"))
 
     def _on_order_toggle(self, on):
         self._order_mode = bool(on)
+        # reading-order mode: clicks set the order instead of drawing boxes
+        self.overlay.set_edit_mode(not on)
         if on:
-            if self.edit_btn.isChecked():
-                self.edit_btn.setChecked(False)
             self._order_counter = 1
             pg = self._page()
             if pg:
@@ -2810,7 +2751,7 @@ class TrainerWindow(QMainWindow):
             self._status(self._tr("no_boxes"), error=True)
             return
         self._push_undo()
-        auto_order(pg["boxes"], rtl=self.rtl_chk.isChecked())
+        auto_order(pg["boxes"], rtl=self._rtl)
         self._order_counter = len(pg["boxes"]) + 1
         self._refresh()
         self._status(self._tr("ranked").format(n=len(pg["boxes"])))
