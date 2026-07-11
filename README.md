@@ -7,9 +7,10 @@ just want to label images.
 
 ## Run it
 
-- **No-Python `.exe` (easiest):** run **`dist/BubblR-Trainer.exe`** — a single
-  standalone file, no Python or PyQt5 install needed. Build it yourself with
-  **`build_exe.bat`** (see Notes).
+- **No-Python `.exe` (easiest):** run **`dist/BubblR-Trainer/BubblR-Trainer.exe`**
+  — no Python or PyQt5 install needed. It's a folder build (fastest start, no
+  unpacking) — keep the `BubblR-Trainer` folder together and run the `.exe`
+  inside it. Build it yourself with **`build_exe.bat`** (see Notes).
 - **Windows (with Python):** double-click **`run.bat`** — installs PyQt5 the
   first time, then starts the app.
 - **Any OS / manually:**
@@ -95,12 +96,13 @@ Classes: **bubble = 0**, **sfx = 1**.
 - Settings (language, dataset folder) are stored in `~/.bubblr_trainer.json`.
 - Bilingual (English / Deutsch) — switch with the dropdown at the top-right.
 - **Make a no-Python `.exe`:** double-click **`build_exe.bat`** (installs
-  PyInstaller if needed, then builds). Result: `dist/BubblR-Trainer.exe` — a
-  single ~36 MB file you can copy anywhere and run without Python or PyQt5.
-  - This is a *one-file* build: it unpacks to a temp folder on each launch, so
-    the very first start takes a moment. For the **fastest** start instead,
-    build a folder version — edit `build_exe.bat` to use `--onedir` (drop
-    `--onefile`); you then ship the whole `dist/BubblR-Trainer/` folder and its
-    `.exe` launches without unpacking.
-  - The `build/`, `dist/` and `.spec` outputs are git-ignored (the exe isn't
+  PyInstaller if needed, then builds). Result: the folder
+  `dist/BubblR-Trainer/` with **`BubblR-Trainer.exe`** inside — no Python or
+  PyQt5 needed to run it.
+  - This is a *one-folder* (`--onedir`) build: it starts fast because nothing
+    unpacks at launch. Share the **whole folder** (~90 MB). Want a single
+    portable file instead? Edit `build_exe.bat` to use `--onefile` — then you
+    get one `dist/BubblR-Trainer.exe`, at the cost of a short unpack on every
+    start.
+  - The `build/`, `dist/` and `.spec` outputs are git-ignored (the build isn't
     committed — rebuild it locally).

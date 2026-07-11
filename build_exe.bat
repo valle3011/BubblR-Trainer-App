@@ -17,8 +17,10 @@ if errorlevel 1 (
   python -m pip install pyinstaller || (echo [FEHLER] Installation fehlgeschlagen. & pause & exit /b 1)
 )
 
-echo Baue BubblR-Trainer.exe ...
-python -m PyInstaller --onefile --windowed --name "BubblR-Trainer" --noconfirm --clean bubblr_trainer_app.py
+rem --onedir = Ordner-Version: startet am schnellsten (kein Entpacken).
+rem Fuer eine Einzeldatei stattdessen --onefile setzen (startet etwas langsamer).
+echo Baue BubblR-Trainer (onedir) ...
+python -m PyInstaller --onedir --windowed --name "BubblR-Trainer" --noconfirm --clean bubblr_trainer_app.py
 if errorlevel 1 (
   echo [FEHLER] Build fehlgeschlagen.
   pause
@@ -26,6 +28,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo Fertig:  "%~dp0dist\BubblR-Trainer.exe"
+echo Fertig:  "%~dp0dist\BubblR-Trainer\BubblR-Trainer.exe"
+echo (den ganzen Ordner "dist\BubblR-Trainer" weitergeben)
 pause
 endlocal
