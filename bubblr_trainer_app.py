@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.6"
+VERSION = "5.7"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -217,6 +217,12 @@ LANG = {
         "settings_display": "Display", "settings_tools": "Tools",
         "settings_newbox": "New boxes", "settings_storage": "Storage location",
         "settings_discord": "Discord",
+        "start_sub": "Load manga pages, box every bubble and SFX, then export "
+                     "the training data. No AI here.",
+        "start_load": "Load images…", "start_folder": "Load folder…",
+        "start_open": "Open project…", "start_rank": "Rank && load…",
+        "start_recent": "Recent images",
+        "recent_missing": "That image no longer exists.",
         "mi_discord": "Show on Discord",
         "discord_need_id": "Set your Discord Application ID in Settings → Discord.",
         "discord_enable": "Show “in BubblR Trainer” on Discord",
@@ -426,6 +432,12 @@ LANG = {
         "settings_display": "Anzeige", "settings_tools": "Werkzeuge",
         "settings_newbox": "Neue Boxen", "settings_storage": "Speicherort",
         "settings_discord": "Discord",
+        "start_sub": "Manga-Seiten laden, jede Blase und jeden SFX einrahmen, "
+                     "dann die Trainingsdaten exportieren. Keine KI hier.",
+        "start_load": "Bilder laden…", "start_folder": "Ordner laden…",
+        "start_open": "Projekt öffnen…", "start_rank": "Rank && load…",
+        "start_recent": "Zuletzt geöffnet",
+        "recent_missing": "Dieses Bild existiert nicht mehr.",
         "mi_discord": "Auf Discord anzeigen",
         "discord_need_id": "Trage deine Discord-Application-ID unter "
                            "Einstellungen → Discord ein.",
@@ -1593,6 +1605,7 @@ class TrainerWindow(QMainWindow):
         self._lang = cfg.get("lang", "en")
         self._folder = cfg.get("folder", "")
         self._last_dir = cfg.get("last_dir", "")  # last place a dialog was used
+        self._recent = [p for p in cfg.get("recent", []) if isinstance(p, str)]
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
@@ -1683,7 +1696,12 @@ class TrainerWindow(QMainWindow):
         self.overlay.rubberSelect.connect(self._on_rubber_select)
         self.overlay.boxContextMenu.connect(self._on_box_context)
         self.overlay.canvasContextMenu.connect(self._on_canvas_context)
-        lay.addWidget(self.overlay, 1)          # the canvas is the central area
+        # the canvas area shows either the editor (overlay) or, when nothing is
+        # loaded, a Krita-style start page with recent images
+        self.canvas_stack = QStackedWidget()
+        self.canvas_stack.addWidget(self.overlay)          # index 0: editor
+        self.canvas_stack.addWidget(self._build_start_page())  # index 1: start
+        lay.addWidget(self.canvas_stack, 1)
 
         # --- Boxes list (moves into its own docker) ---
         self.box_list = QListWidget()
@@ -1821,7 +1839,8 @@ class TrainerWindow(QMainWindow):
                 "rtl": self._rtl, "new_kind": self._new_kind,
                 "center_marker": self._center, "last_dir": self._last_dir,
                 "discord_enabled": self._discord_enabled,
-                "discord_client_id": self._discord_id}
+                "discord_client_id": self._discord_id,
+                "recent": self._recent[:40]}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             data["dockstate"] = bytes(self.saveState()).hex()
@@ -1947,6 +1966,105 @@ class TrainerWindow(QMainWindow):
         pg = self._page()
         if pg and pg["boxes"]:
             auto_order(pg["boxes"], rtl=self._rtl)
+
+    # -- start page (Krita-style welcome with recent images) -----------------
+    def _build_start_page(self):
+        page = QWidget()
+        page.setObjectName("startPage")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(40, 30, 40, 30)
+        outer.setSpacing(10)
+
+        self.start_title = QLabel("BubblR Trainer")
+        self.start_title.setStyleSheet("font-size: 26px; font-weight: bold;")
+        outer.addWidget(self.start_title)
+        self.start_sub = QLabel(self._tr("start_sub"))
+        self.start_sub.setStyleSheet("color: gray;")
+        self.start_sub.setWordWrap(True)
+        outer.addWidget(self.start_sub)
+        outer.addSpacing(8)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        specs = [("start_load", self.on_load_images),
+                 ("start_folder", self.on_load_folder),
+                 ("start_open", self.on_load_project),
+                 ("start_rank", self.on_rank_load)]
+        self._start_btns = []
+        for key, fn in specs:
+            b = QPushButton(self._tr(key))
+            b.setMinimumHeight(40)
+            b.clicked.connect(lambda _c=False, f=fn: f())
+            row.addWidget(b)
+            self._start_btns.append((b, key))
+        row.addStretch(1)
+        outer.addLayout(row)
+        outer.addSpacing(10)
+
+        self.start_recent_lbl = QLabel(self._tr("start_recent"))
+        self.start_recent_lbl.setStyleSheet("font-weight: bold;")
+        outer.addWidget(self.start_recent_lbl)
+
+        self.recent_list = QListWidget()
+        self.recent_list.setViewMode(QListWidget.IconMode)
+        self.recent_list.setResizeMode(QListWidget.Adjust)
+        self.recent_list.setMovement(QListWidget.Static)
+        self.recent_list.setWrapping(True)
+        self.recent_list.setSpacing(10)
+        self.recent_list.setIconSize(QSize(140, 180))
+        self.recent_list.setGridSize(QSize(160, 216))
+        self.recent_list.setWordWrap(True)
+        self.recent_list.setFrameShape(QFrame.NoFrame)
+        self.recent_list.itemClicked.connect(self._on_recent_clicked)
+        outer.addWidget(self.recent_list, 1)
+        return page
+
+    def _on_recent_clicked(self, item):
+        path = item.data(Qt.UserRole)
+        if path and os.path.exists(path):
+            self.add_image_paths([path])
+        elif path:
+            self._status(self._tr("recent_missing"), error=True)
+            self._recent = [p for p in self._recent if p != path]
+            self._rebuild_recent()
+
+    def _remember_recent(self, paths):
+        """Push loaded image paths to the front of the recent list (dedup)."""
+        for p in reversed(list(paths)):
+            ap = os.path.abspath(p)
+            self._recent = [q for q in self._recent if q != ap]
+            self._recent.insert(0, ap)
+        self._recent = self._recent[:40]
+        self._save_settings()
+
+    def _rebuild_recent(self):
+        if not hasattr(self, "recent_list"):
+            return
+        lw = self.recent_list
+        lw.clear()
+        for p in self._recent[:40]:
+            if not os.path.exists(p):
+                continue
+            img = QImage(p)
+            if img.isNull():
+                continue
+            pm = QPixmap.fromImage(img.scaled(
+                QSize(140, 180), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            it = QListWidgetItem(QIcon(pm), os.path.basename(p))
+            it.setToolTip(p)
+            it.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
+            it.setData(Qt.UserRole, p)
+            lw.addItem(it)
+
+    def _sync_start_page(self):
+        """Show the start page when nothing is loaded, else the editor."""
+        if not hasattr(self, "canvas_stack"):
+            return
+        if self._pages:
+            self.canvas_stack.setCurrentWidget(self.overlay)
+        else:
+            self._rebuild_recent()
+            self.canvas_stack.setCurrentIndex(1)   # the start page
 
     def _unexported_count(self):
         """Pages that have boxes but have not been exported into the dataset."""
@@ -2774,6 +2892,11 @@ class TrainerWindow(QMainWindow):
         self.order_btn.setText(t("set_order"))
         self.auto_order_btn.setText(t("auto_order"))
         self.auto_order_btn.setToolTip(t("auto_order_tip"))
+        if hasattr(self, "start_sub"):
+            self.start_sub.setText(t("start_sub"))
+            self.start_recent_lbl.setText(t("start_recent"))
+            for b, key in self._start_btns:
+                b.setText(t(key))
         self._refresh()
 
     # -- helpers --
@@ -2811,6 +2934,7 @@ class TrainerWindow(QMainWindow):
         if hasattr(self, "box_list"):
             self._rebuild_box_list()
         self._sync_page_strip()
+        self._sync_start_page()
         self._update_discord()
 
     def _set_kind(self, kind):
@@ -3199,6 +3323,7 @@ class TrainerWindow(QMainWindow):
         """Load the given image files as pages (used by the file dialog and by
         image paths passed on the command line). Returns how many were added."""
         added = 0
+        loaded = []
         for p in paths:
             img = QImage(p)
             if img.isNull():
@@ -3209,8 +3334,10 @@ class TrainerWindow(QMainWindow):
             self._pages.append({"path": p, "name": name,
                                 "img": img.convertToFormat(QImage.Format_RGB888),
                                 "boxes": []})
+            loaded.append(p)
             added += 1
         if added:
+            self._remember_recent(loaded)
             if self._cur < 0:
                 self._goto(0)
             else:

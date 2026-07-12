@@ -28,6 +28,13 @@ just want to label images.
 > "Add Python to PATH" during setup — only needed for `run.bat` / manual run,
 > not for the `.exe`.
 
+## Start page
+
+When no pages are loaded, the canvas shows a **Krita-style start page**: big
+**Load images / Load folder / Open project / Rank && load** buttons and a grid
+of **recent images** — click a thumbnail to jump straight back into it. It
+reappears whenever you close all pages.
+
 ## How to label
 
 1. **Load images…** — pick one or many manga page images (PNG/JPG/…). They become
