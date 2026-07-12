@@ -13,20 +13,75 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QSpinBox, QPlainTextEdit,
     QFileDialog, QProgressBar, QMessageBox, QGroupBox, QCheckBox, QDialog,
-    QDialogButtonBox)
+    QDialogButtonBox, QToolButton, QMenu)
 from PyQt5.QtGui import QColor, QPalette, QFont, QIcon
-from PyQt5.QtCore import QProcess
+from PyQt5.QtCore import QProcess, QTimer, QThread, pyqtSignal
 
 from bubblr_train_core import (
     read_yaml_summary, build_train_script, train_config, parse_progress,
-    strip_ansi)
+    strip_ansi, build_predict_script, predict_config, diagnose_error,
+    check_dataset, parse_metrics, MODEL_URL, model_path)
 
-VERSION = "0.1.0"
+
+class ModelFetcher(QThread):
+    """Download the shared model (bubblr-model.pt) from the BubblR-Model repo."""
+    done = pyqtSignal(object)                     # local path, or None
+
+    def run(self):
+        dest = model_path()
+        try:
+            import urllib.request
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            req = urllib.request.Request(MODEL_URL,
+                                         headers={"User-Agent": "BubblR-MT"})
+            with urllib.request.urlopen(req, timeout=60) as r, \
+                    open(dest, "wb") as f:
+                f.write(r.read())
+            if os.path.getsize(dest) < 1024:      # not a real .pt (error page)
+                raise ValueError("no model published yet")
+            self.done.emit(dest)
+        except Exception:                        # noqa: BLE001
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+            except OSError:
+                pass
+            self.done.emit(None)
+
+
+class NewsFetcher(QThread):
+    """Fetch the project's news.json to see if a newer Model Trainer exists."""
+    loaded = pyqtSignal(object)
+    URL = ("https://raw.githubusercontent.com/valle3011/"
+           "BubblR-Trainer-App/main/news.json")
+
+    def run(self):
+        try:
+            import urllib.request
+            req = urllib.request.Request(self.URL,
+                                         headers={"User-Agent": "BubblR-MT"})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                self.loaded.emit(json.loads(r.read().decode("utf-8")))
+        except Exception:                        # noqa: BLE001 (offline etc.)
+            self.loaded.emit(None)
+
+
+def _ver_tuple(v):
+    out = []
+    for part in str(v or "0").split("."):
+        try:
+            out.append(int(part))
+        except ValueError:
+            out.append(0)
+    return tuple(out)
+
+VERSION = "0.3.0"
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_model_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_model_trainer_shortcut")
@@ -87,6 +142,17 @@ class TrainerWindow(QMainWindow):
         self.data_edit.textChanged.connect(self._on_data_changed)
         data_browse = QPushButton("Browse…")
         data_browse.clicked.connect(self._pick_data)
+        self.recent_btn = QToolButton()
+        self.recent_btn.setText("Recent ▾")
+        self.recent_btn.setPopupMode(QToolButton.InstantPopup)
+        self.recent_menu = QMenu(self.recent_btn)
+        self.recent_btn.setMenu(self.recent_menu)
+        self._recent = [p for p in cfg.get("recent", []) if isinstance(p, str)]
+        browse_cell = QWidget()
+        bc = QHBoxLayout(browse_cell)
+        bc.setContentsMargins(0, 0, 0, 0)
+        bc.addWidget(data_browse)
+        bc.addWidget(self.recent_btn)
         self.data_info = QLabel("—")
         self.data_info.setStyleSheet("color:#9aa;")
         self.task_combo = QComboBox()
@@ -103,12 +169,17 @@ class TrainerWindow(QMainWindow):
         self.custom_browse.setVisible(False)
         dg.addWidget(QLabel("data.yaml:"), 0, 0)
         dg.addWidget(self.data_edit, 0, 1, 1, 2)
-        dg.addWidget(data_browse, 0, 3)
+        dg.addWidget(browse_cell, 0, 3)
         dg.addWidget(self.data_info, 1, 1, 1, 3)
         dg.addWidget(QLabel("Task:"), 2, 0)
         dg.addWidget(self.task_combo, 2, 1)
+        self.getmodel_btn = QPushButton("Download latest")
+        self.getmodel_btn.setToolTip("Fetch the shared BubblR model and use it "
+                                     "as the base (to continue training / test)")
+        self.getmodel_btn.clicked.connect(self._download_model)
         dg.addWidget(QLabel("Base model:"), 3, 0)
         dg.addWidget(self.model_combo, 3, 1, 1, 2)
+        dg.addWidget(self.getmodel_btn, 3, 3)
         dg.addWidget(self.custom_edit, 4, 1, 1, 2)
         dg.addWidget(self.custom_browse, 4, 3)
         root.addWidget(ds_box)
@@ -131,6 +202,13 @@ class TrainerWindow(QMainWindow):
         self.device.addItems(["auto", "cpu", "0", "1"])
         self.device.setCurrentText(cfg.get("device", "auto"))
         self.run_name = QLineEdit(cfg.get("name", "bubblr_run"))
+        self.patience = QSpinBox()
+        self.patience.setRange(0, 10000)
+        self.patience.setValue(int(cfg.get("patience", 100)))
+        self.patience.setToolTip("Stop early if no improvement for N epochs "
+                                 "(0 = never stop early)")
+        self.resume_box = QCheckBox("Resume interrupted run (from last.pt)")
+        self.resume_box.setChecked(False)
         hg.addWidget(QLabel("Epochs:"), 0, 0)
         hg.addWidget(self.epochs, 0, 1)
         hg.addWidget(QLabel("Image size:"), 0, 2)
@@ -139,9 +217,33 @@ class TrainerWindow(QMainWindow):
         hg.addWidget(self.batch, 1, 1)
         hg.addWidget(QLabel("Device:"), 1, 2)
         hg.addWidget(self.device, 1, 3)
-        hg.addWidget(QLabel("Run name:"), 2, 0)
-        hg.addWidget(self.run_name, 2, 1, 1, 3)
+        hg.addWidget(QLabel("Patience:"), 2, 0)
+        hg.addWidget(self.patience, 2, 1)
+        hg.addWidget(self.resume_box, 2, 2, 1, 2)
+        hg.addWidget(QLabel("Run name:"), 3, 0)
+        hg.addWidget(self.run_name, 3, 1, 1, 3)
         root.addWidget(hp_box)
+
+        # -- Advanced (collapsible; off by default) --
+        adv_box = QGroupBox("Advanced")
+        adv_box.setCheckable(True)
+        adv_box.setChecked(bool(cfg.get("advanced_open", False)))
+        ag = QGridLayout(adv_box)
+        self.workers = QSpinBox()
+        self.workers.setRange(0, 32)
+        self.workers.setValue(int(cfg.get("workers", 8)))
+        self.workers.setToolTip("DataLoader workers. Set 0 if training crashes "
+                                "with 'worker exited unexpectedly'.")
+        self.cache_box = QCheckBox("Cache images (faster, more RAM)")
+        self.cache_box.setChecked(bool(cfg.get("cache", False)))
+        self.pretrained_box = QCheckBox("Start from pretrained weights")
+        self.pretrained_box.setChecked(bool(cfg.get("pretrained", True)))
+        ag.addWidget(QLabel("Workers:"), 0, 0)
+        ag.addWidget(self.workers, 0, 1)
+        ag.addWidget(self.cache_box, 0, 2)
+        ag.addWidget(self.pretrained_box, 1, 2)
+        root.addWidget(adv_box)
+        self.adv_box = adv_box
 
         # -- Run controls + log --
         run_row = QHBoxLayout()
@@ -150,18 +252,24 @@ class TrainerWindow(QMainWindow):
         self.stop_btn = QPushButton("■  Stop")
         self.stop_btn.clicked.connect(self._stop)
         self.stop_btn.setEnabled(False)
+        self.test_btn = QPushButton("Test on image…")
+        self.test_btn.clicked.connect(self._test_model)
         self.results_btn = QPushButton("Open results")
         self.results_btn.clicked.connect(self._open_results)
         self.results_btn.setEnabled(False)
         run_row.addWidget(self.start_btn)
         run_row.addWidget(self.stop_btn)
         run_row.addStretch(1)
+        run_row.addWidget(self.test_btn)
         run_row.addWidget(self.results_btn)
         root.addLayout(run_row)
 
         self.progress = QProgressBar()
         self.progress.setValue(0)
         root.addWidget(self.progress)
+        self.stat_lbl = QLabel("")
+        self.stat_lbl.setStyleSheet("color:#9aa;")
+        root.addWidget(self.stat_lbl)
 
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -170,12 +278,53 @@ class TrainerWindow(QMainWindow):
         root.addWidget(self.log, 1)
 
         self._last_run_dir = None
+        self._train_log = []               # collected log lines (metrics/errors)
+        self._start_time = None
+        self._cuda = None                  # set once the env Check reports it
+        self._eta_timer = QTimer(self)
+        self._eta_timer.setInterval(1000)
+        self._eta_timer.timeout.connect(self._tick)
         self._rebuild_models()
         if cfg.get("model") and cfg.get("model") != CUSTOM_LABEL:
             i = self.model_combo.findText(cfg["model"])
             if i >= 0:
                 self.model_combo.setCurrentIndex(i)
         self._on_data_changed()
+        self._rebuild_recent()
+        # background: is a newer Model Trainer available?
+        self._news = NewsFetcher(self)
+        self._news.loaded.connect(self._on_news)
+        self._news.start()
+
+    # -- recent datasets --
+    def _rebuild_recent(self):
+        self.recent_menu.clear()
+        self._recent = [p for p in self._recent if p][:8]
+        if not self._recent:
+            act = self.recent_menu.addAction("(none yet)")
+            act.setEnabled(False)
+            return
+        for p in self._recent:
+            act = self.recent_menu.addAction(p)
+            act.triggered.connect(lambda _c=False, path=p: self.data_edit.setText(path))
+
+    def _remember_recent(self, path):
+        if not path:
+            return
+        self._recent = [path] + [p for p in self._recent if p != path]
+        self._recent = self._recent[:8]
+        self._rebuild_recent()
+
+    # -- update check --
+    def _on_news(self, data):
+        try:
+            latest = (data or {}).get("model_trainer_version")
+            if latest and _ver_tuple(latest) > _ver_tuple(VERSION):
+                self.env_status.setText(
+                    "A newer Model Trainer (v%s) is available — see the project "
+                    "Releases." % latest)
+        except Exception:                        # noqa: BLE001
+            pass
 
     # -- model list depends on task --
     def _rebuild_models(self):
@@ -217,6 +366,7 @@ class TrainerWindow(QMainWindow):
             self, "Select data.yaml", start, "YAML (*.yaml *.yml)")
         if path:
             self.data_edit.setText(path)
+            self._remember_recent(path)
 
     def _pick_custom(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -273,14 +423,37 @@ class TrainerWindow(QMainWindow):
         if not model:
             QMessageBox.warning(self, "No model", "Pick a base model or a .pt file.")
             return
+        # pre-flight dataset check
+        ok, msgs = check_dataset(data)
+        if not ok:
+            QMessageBox.warning(self, "Dataset problem", "\n".join(msgs))
+            return
+        if any(m.startswith("⚠") for m in msgs):
+            if QMessageBox.question(
+                    self, "Dataset check", "\n".join(msgs) + "\n\nStart anyway?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes) != QMessageBox.Yes:
+                return
         project = os.path.join(os.path.dirname(os.path.abspath(data)), "runs")
         name = self.run_name.text().strip() or "bubblr_run"
         dev = self.device.currentText()
+        resume = self.resume_box.isChecked()
+        if resume:                             # continue from the run's last.pt
+            last = os.path.join(project, name, "weights", "last.pt")
+            if not os.path.isfile(last):
+                QMessageBox.warning(self, "Resume", "No last.pt found for run "
+                                    "'%s' — uncheck Resume to start fresh." % name)
+                return
+            model = last
+        workers = self.workers.value() if self.adv_box.isChecked() else None
         cfg = train_config(
             model, data, self.epochs.value(), self.imgsz.value(),
-            self.batch.value(), "" if dev == "auto" else dev, project, name)
+            self.batch.value(), "" if dev == "auto" else dev, project, name,
+            patience=self.patience.value(), workers=workers,
+            cache=self.cache_box.isChecked() if self.adv_box.isChecked() else False,
+            pretrained=self.pretrained_box.isChecked(), resume=resume)
         self._last_run_dir = os.path.join(project, name)
-        # write the training script + its config to temp
+        self._remember_recent(data)
         d = tempfile.mkdtemp(prefix="bubblr_train_")
         self._script_path = os.path.join(d, "train.py")
         cfg_path = os.path.join(d, "cfg.json")
@@ -291,6 +464,11 @@ class TrainerWindow(QMainWindow):
         self._save()
         self.progress.setValue(0)
         self.log.clear()
+        self._train_log = []
+        self._start_time = time.time()
+        self._eta_timer.start()
+        for m in msgs:
+            self._append(m + "\n")
         self._append("Training %s on %s\n" % (model, data))
         self._start_process([self._python(), "-u", self._script_path, cfg_path],
                             side=False)
@@ -318,17 +496,27 @@ class TrainerWindow(QMainWindow):
         data = bytes(self._proc.readAllStandardOutput()).decode(
             "utf-8", "replace")
         for line in data.splitlines():
+            clean = strip_ansi(line)
+            self._train_log.append(clean)
+            if "cuda True" in clean:
+                self._cuda = True
+                if self.device.currentText() in ("auto", "cpu"):
+                    self.device.setCurrentText("0")
+            elif "cuda False" in clean:
+                self._cuda = False
+                self.device.setCurrentText("cpu")
             pr = parse_progress(line)
             if pr:
                 self.progress.setMaximum(pr[1])
                 self.progress.setValue(pr[0])
-            self._append(strip_ansi(line) + "\n")
+            self._append(clean + "\n")
 
     def _on_proc_error(self, _err):
         self._append("\n[could not start the process — check the Python path]\n")
 
     def _on_finished(self, code, side):
         self._proc = None
+        self._eta_timer.stop()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.check_btn.setEnabled(True)
@@ -336,15 +524,167 @@ class TrainerWindow(QMainWindow):
         if side:
             self.env_status.setText("done (exit %d)" % code)
             return
+        log = "\n".join(self._train_log)
         if code == 0:
             self.progress.setValue(self.progress.maximum())
             self.results_btn.setEnabled(bool(self._last_run_dir))
             best = os.path.join(self._last_run_dir or "", "weights", "best.pt")
-            self._append("\n✅ Training finished. Best weights:\n%s\n" % best)
-            QMessageBox.information(
-                self, "Done", "Training finished.\n\nBest weights:\n%s" % best)
+            metrics = parse_metrics(log)
+            mtxt = ""
+            if metrics:
+                mtxt = ("\n\nmAP50: %.3f   mAP50-95: %.3f   P: %.3f   R: %.3f"
+                        % (metrics["mAP50"], metrics["mAP50_95"],
+                           metrics["P"], metrics["R"]))
+            elapsed = self._fmt(time.time() - (self._start_time or time.time()))
+            self.stat_lbl.setText("Done in %s.%s" % (
+                elapsed, mtxt.replace("\n", "  ")))
+            self._append("\n✅ Training finished in %s. Best weights:\n%s%s\n"
+                         % (elapsed, best, mtxt))
+            box = QMessageBox(self)
+            box.setWindowTitle("Done")
+            box.setIcon(QMessageBox.Information)
+            box.setText("Training finished in %s.\n\nBest weights:\n%s%s"
+                        % (elapsed, best, mtxt))
+            plot = os.path.join(self._last_run_dir or "", "results.png")
+            if os.path.isfile(plot):
+                box.addButton("Show plots", QMessageBox.ActionRole)
+            box.addButton(QMessageBox.Ok)
+            box.exec_()
+            clicked = box.clickedButton()      # "Show plots" opens results.png
+            if clicked and box.buttonRole(clicked) == QMessageBox.ActionRole:
+                self._open_path(plot)
         else:
+            hint = diagnose_error(log)
+            self.stat_lbl.setText("Failed (exit %d)." % code)
             self._append("\n❌ Training exited with code %d.\n" % code)
+            if hint:
+                self._append("Hint: %s\n" % hint)
+                QMessageBox.warning(self, "Training failed", hint)
+
+    def _tick(self):
+        """Update the elapsed / ETA line once a second while training."""
+        if not self._start_time:
+            return
+        elapsed = time.time() - self._start_time
+        cur, total = self.progress.value(), self.progress.maximum()
+        eta = ""
+        if cur > 0 and total > 0 and cur < total:
+            per = elapsed / cur
+            eta = "   ETA ~%s" % self._fmt(per * (total - cur))
+        self.stat_lbl.setText("Epoch %d/%d   elapsed %s%s"
+                              % (cur, total, self._fmt(elapsed), eta))
+
+    @staticmethod
+    def _fmt(secs):
+        secs = int(secs)
+        h, r = divmod(secs, 3600)
+        m, s = divmod(r, 60)
+        return ("%dh %02dm" % (h, m)) if h else ("%dm %02ds" % (m, s))
+
+    # -- download the shared model from the BubblR-Model repo --
+    def _download_model(self):
+        self.getmodel_btn.setEnabled(False)
+        self.getmodel_btn.setText("Downloading…")
+        self._model_thread = ModelFetcher(self)
+        self._model_thread.done.connect(self._on_model_downloaded)
+        self._model_thread.start()
+
+    def _on_model_downloaded(self, path):
+        self._model_thread = None
+        self.getmodel_btn.setEnabled(True)
+        self.getmodel_btn.setText("Download latest")
+        if not path:
+            QMessageBox.information(
+                self, "No model yet",
+                "Couldn't download a model — none has been published to the "
+                "BubblR-Model repo yet, or you're offline.")
+            return
+        # select it as the custom base model, ready to use / continue-train
+        i = self.model_combo.findText(CUSTOM_LABEL)
+        if i >= 0:
+            self.model_combo.setCurrentIndex(i)
+        self.custom_edit.setText(path)
+        self._append("\nDownloaded shared model:\n%s\n" % path)
+        QMessageBox.information(self, "Model ready",
+                                "Latest model downloaded and selected as the "
+                                "base model:\n%s" % path)
+
+    # -- test a trained model on an image --
+    def _test_model(self):
+        if self._proc is not None:
+            QMessageBox.information(self, "Busy", "A process is already running.")
+            return
+        best = os.path.join(self._last_run_dir or "", "weights", "best.pt")
+        model = best if os.path.isfile(best) else self._resolve_model()
+        if not model:
+            QMessageBox.warning(self, "No model", "Train first, or pick a model "
+                                "(base / Custom model file).")
+            return
+        img, _ = QFileDialog.getOpenFileName(
+            self, "Pick an image to test on", os.path.expanduser("~"),
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if not img:
+            return
+        outdir = os.path.join(tempfile.gettempdir(), "bubblr_predict")
+        cfg = predict_config(model, img, outdir, "test", self.imgsz.value())
+        d = tempfile.mkdtemp(prefix="bubblr_pred_")
+        sp = os.path.join(d, "predict.py")
+        cp = os.path.join(d, "cfg.json")
+        open(sp, "w", encoding="utf-8").write(build_predict_script(cfg))
+        json.dump(cfg, open(cp, "w"))
+        self._predict_dir = os.path.join(outdir, "test")
+        self._predict_stem = os.path.splitext(os.path.basename(img))[0]
+        self.log.clear()
+        self._train_log = []
+        self._append("Testing %s on %s …\n" % (os.path.basename(model), img))
+        self._proc = QProcess(self)
+        self._proc.setProcessChannelMode(QProcess.MergedChannels)
+        self._proc.readyReadStandardOutput.connect(self._on_output)
+        self._proc.finished.connect(lambda code, _s: self._on_predict_done(code))
+        self._proc.errorOccurred.connect(self._on_proc_error)
+        self.start_btn.setEnabled(False)
+        self.test_btn.setEnabled(False)
+        self._proc.start(self._python(), ["-u", sp, cp])
+
+    def _on_predict_done(self, code):
+        self._proc = None
+        self.start_btn.setEnabled(True)
+        self.test_btn.setEnabled(True)
+        if code != 0:
+            hint = diagnose_error("\n".join(self._train_log))
+            self._append("\n❌ Prediction failed (exit %d).\n" % code)
+            if hint:
+                QMessageBox.warning(self, "Prediction failed", hint)
+            return
+        # find the annotated image: Ultralytics saves it (as .jpg) in save_dir,
+        # reported on the BUBBLR_PREDICT line; fall back to our expected folder.
+        save_dir = self._predict_dir
+        for line in self._train_log:
+            if line.startswith("BUBBLR_PREDICT"):
+                d = line.split(" ", 1)[1].strip()
+                if d:
+                    save_dir = d
+        found = ""
+        if os.path.isdir(save_dir):
+            for f in os.listdir(save_dir):
+                stem, ext = os.path.splitext(f)
+                if stem == self._predict_stem and ext.lower() in (
+                        ".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+                    found = os.path.join(save_dir, f)
+                    break
+        if found:
+            self._append("\n✅ Result saved:\n%s\n" % found)
+            self._open_path(found)
+        else:
+            self._append("\n✅ Prediction done — see:\n%s\n" % save_dir)
+            self._open_path(save_dir)
+
+    def _open_path(self, path):
+        if path and os.path.exists(path) and sys.platform.startswith("win"):
+            try:
+                os.startfile(path)             # noqa: S606 (user-invoked)
+            except OSError:
+                pass
 
     def _open_results(self):
         d = self._last_run_dir
@@ -376,7 +716,13 @@ class TrainerWindow(QMainWindow):
                 "epochs": self.epochs.value(), "imgsz": self.imgsz.value(),
                 "batch": self.batch.value(),
                 "device": self.device.currentText(),
-                "name": self.run_name.text().strip()}
+                "name": self.run_name.text().strip(),
+                "patience": self.patience.value(),
+                "workers": self.workers.value(),
+                "cache": self.cache_box.isChecked(),
+                "pretrained": self.pretrained_box.isChecked(),
+                "advanced_open": self.adv_box.isChecked(),
+                "recent": self._recent[:8]}
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=2)
@@ -475,7 +821,7 @@ def _resource(*parts):
 
 
 def app_icon():
-    for name in ("icon.ico", "icon.png"):
+    for name in ("model_icon.ico", "model_icon.png", "icon.ico", "icon.png"):
         p = _resource("assets", name)
         if os.path.exists(p):
             return QIcon(p)
@@ -503,7 +849,7 @@ def _shortcut_command(desktop, startmenu):
     else:
         script = os.path.abspath(__file__)
         target, args, workdir = _pythonw(), '"%s"' % script, os.path.dirname(script)
-    icon = _resource("assets", "icon.ico")
+    icon = _resource("assets", "model_icon.ico")
     folders = []
     if desktop:
         folders.append("[Environment]::GetFolderPath('Desktop')")

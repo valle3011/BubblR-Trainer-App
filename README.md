@@ -273,6 +273,22 @@ Python environment** you point it at, so the app itself stays small:
 So end to end: **label in BubblR Trainer → export → train in BubblR Model
 Trainer → get a `best.pt`** you can use anywhere Ultralytics runs.
 
+## Shared AI model (pull from git)
+
+A separate repo, **[BubblR-Model](https://github.com/valle3011/BubblR-Model)**,
+hosts the latest trained model as a release asset (`bubblr-model.pt`). Both apps
+can pull it directly:
+
+- **BubblR Model Trainer → Download latest** — fetches the model and selects it as
+  the base, ready to **continue-train** or **Test on image**.
+- **BubblR Trainer → Tools → Download latest AI model**, then **AI-detect boxes on
+  this page** — runs the model (via the BubblR AI Python env) and **auto-labels**
+  the page so you only fix mistakes instead of drawing everything. (These live in
+  the experimental Tools menu.)
+
+Publish a new model by creating a release in BubblR-Model whose asset is named
+`bubblr-model.pt` (see that repo's README).
+
 ## Not just manga — any object detector
 
 The export is plain **YOLO detection data** (image + `class cx cy w h`), so the

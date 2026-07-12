@@ -4,7 +4,54 @@
 Kept separate from the PyQt5 app so the exact command/script the GUI runs can be
 unit-tested and reused without importing Qt."""
 
+import os
 import re
+
+# --- shared model distribution (the BubblR-Model repo) ---
+MODEL_URL = ("https://github.com/valle3011/BubblR-Model/releases/"
+             "latest/download/bubblr-model.pt")
+MODEL_META_URL = ("https://raw.githubusercontent.com/valle3011/"
+                  "BubblR-Model/main/model.json")
+
+
+def model_path():
+    """Local path where the downloaded shared model is kept."""
+    d = os.path.join(os.path.expanduser("~"), ".bubblr_ai")
+    return os.path.join(d, "bubblr-model.pt")
+
+
+def build_detect_script(cfg):
+    """Run a model on one image and print the detected boxes as JSON (normalised
+    xywh + class index + confidence) on a 'BUBBLR_BOXES' line. For pre-labelling
+    in BubblR Trainer. Guarded for Windows spawn safety."""
+    return (
+        "import json, sys, multiprocessing\n"
+        "from ultralytics import YOLO\n"
+        "\n"
+        "def _run():\n"
+        "    c = json.load(open(sys.argv[1], encoding='utf-8'))\n"
+        "    m = YOLO(c['model'])\n"
+        "    res = m.predict(source=c['source'], imgsz=c['imgsz'],\n"
+        "                    conf=c['conf'], save=False, verbose=False)\n"
+        "    out = []\n"
+        "    for r in res:\n"
+        "        b = r.boxes\n"
+        "        if b is None:\n"
+        "            continue\n"
+        "        for (cx, cy, w, h), k, s in zip(b.xywhn.tolist(),\n"
+        "                                        b.cls.tolist(), b.conf.tolist()):\n"
+        "            out.append({'cls': int(k), 'cx': cx, 'cy': cy,\n"
+        "                        'w': w, 'h': h, 'conf': s})\n"
+        "    print('BUBBLR_BOXES', json.dumps(out))\n"
+        "\n"
+        "if __name__ == '__main__':\n"
+        "    multiprocessing.freeze_support()\n"
+        "    _run()\n")
+
+
+def detect_config(model, source, imgsz=640, conf=0.25):
+    return {"model": model, "source": source, "imgsz": int(imgsz),
+            "conf": float(conf)}
 
 
 def read_yaml_summary(path):
@@ -62,6 +109,11 @@ def build_train_script(cfg):
         "              exist_ok=True)\n"
         "    if c.get('device'):\n"
         "        kw['device'] = c['device']\n"
+        "    for k in ('patience', 'cache', 'pretrained', 'workers'):\n"
+        "        if c.get(k) is not None:\n"
+        "            kw[k] = c[k]\n"
+        "    if c.get('resume'):\n"
+        "        kw['resume'] = True\n"
         "    r = m.train(**kw)\n"
         "    print('BUBBLR_DONE', getattr(r, 'save_dir', ''))\n"
         "\n"
@@ -70,11 +122,136 @@ def build_train_script(cfg):
         "    _run()\n")
 
 
-def train_config(model, data, epochs, imgsz, batch, device, project, name):
-    """Assemble the JSON config the training script consumes."""
-    return {"model": model, "data": data, "epochs": int(epochs),
-            "imgsz": int(imgsz), "batch": int(batch), "device": device or "",
-            "project": project, "name": name}
+def train_config(model, data, epochs, imgsz, batch, device, project, name,
+                 patience=100, workers=None, cache=False, pretrained=True,
+                 resume=False):
+    """Assemble the JSON config the training script consumes. The last five
+    arguments are the optional/advanced controls (early stop, DataLoader workers,
+    image cache, pretrained weights, and resuming an interrupted run)."""
+    cfg = {"model": model, "data": data, "epochs": int(epochs),
+           "imgsz": int(imgsz), "batch": int(batch), "device": device or "",
+           "project": project, "name": name, "patience": int(patience),
+           "cache": bool(cache), "pretrained": bool(pretrained),
+           "resume": bool(resume)}
+    if workers is not None:
+        cfg["workers"] = int(workers)
+    return cfg
+
+
+def build_predict_script(cfg):
+    """Ultralytics prediction script (run best.pt on an image, save the annotated
+    result). Guarded like the training script for Windows spawn safety."""
+    return (
+        "import json, sys, multiprocessing\n"
+        "from ultralytics import YOLO\n"
+        "\n"
+        "def _run():\n"
+        "    c = json.load(open(sys.argv[1], encoding='utf-8'))\n"
+        "    m = YOLO(c['model'])\n"
+        "    r = m.predict(source=c['source'], save=True, project=c['project'],\n"
+        "                  name=c['name'], exist_ok=True, imgsz=c['imgsz'],\n"
+        "                  conf=c['conf'])\n"
+        "    print('BUBBLR_PREDICT', r[0].save_dir if r else '')\n"
+        "\n"
+        "if __name__ == '__main__':\n"
+        "    multiprocessing.freeze_support()\n"
+        "    _run()\n")
+
+
+def predict_config(model, source, project, name, imgsz=640, conf=0.25):
+    return {"model": model, "source": source, "project": project,
+            "name": name, "imgsz": int(imgsz), "conf": float(conf)}
+
+
+def diagnose_error(text):
+    """Map a failed run's log to a short, actionable hint (or None)."""
+    t = (text or "").lower()
+    if "out of memory" in t:
+        return ("GPU out of memory — lower Batch (try 4 or -1) or Image size, "
+                "or set Device to cpu.")
+    if "no module named 'ultralytics'" in t:
+        return ("Ultralytics isn't installed in this Python — use the "
+                "'Install Ultralytics' button.")
+    if "no module named 'torch'" in t:
+        return "PyTorch is missing — 'Install Ultralytics' installs it too."
+    if "worker" in t and "exited unexpectedly" in t:
+        return "DataLoader crashed — in Advanced set workers to 0 and retry."
+    if "no labels found" in t or "missing labels" in t:
+        return ("No labels found — the labels/ folder must sit next to images/ "
+                "and match data.yaml.")
+    if "does not exist" in t or "no such file" in t:
+        return ("A path from data.yaml can't be found — re-export, or fix the "
+                "'path:' line in data.yaml.")
+    return None
+
+
+def parse_metrics(text):
+    """Extract the final validation metrics from the log's summary 'all …' row:
+    returns {'P','R','mAP50','mAP50_95'} or None."""
+    best = None
+    for raw in (text or "").splitlines():
+        line = strip_ansi(raw).strip()
+        if line.startswith("all "):
+            nums = line.split()[1:]
+            try:
+                if len(nums) >= 6:
+                    best = {"P": float(nums[-4]), "R": float(nums[-3]),
+                            "mAP50": float(nums[-2]), "mAP50_95": float(nums[-1])}
+            except ValueError:
+                pass
+    return best
+
+
+def check_dataset(yaml_path):
+    """Light pre-flight check of a YOLO data.yaml. Returns (ok, [messages]) —
+    ok is False only for hard problems (no images); other notes are warnings."""
+    msgs = []
+    if not os.path.isfile(yaml_path):
+        return False, ["data.yaml not found."]
+    base = os.path.dirname(os.path.abspath(yaml_path))
+    root, train_rel, val_rel = base, "images/train", None
+    try:
+        for line in open(yaml_path, encoding="utf-8"):
+            s = line.strip()
+            if s.startswith("path:"):
+                root = s.split(":", 1)[1].strip() or base
+            elif s.startswith("train:"):
+                train_rel = s.split(":", 1)[1].split("#")[0].strip()
+            elif s.startswith("val:"):
+                val_rel = s.split(":", 1)[1].split("#")[0].strip()
+    except OSError:
+        return False, ["Could not read data.yaml."]
+    if not os.path.isabs(root):
+        root = os.path.normpath(os.path.join(base, root))
+
+    def count(rel):
+        d = os.path.normpath(rel if os.path.isabs(rel)
+                             else os.path.join(root, rel))
+        if not os.path.isdir(d):
+            return None, None, d
+        imgs = [f for f in os.listdir(d)
+                if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp"))]
+        ldir = d.replace(os.sep + "images" + os.sep, os.sep + "labels" + os.sep)
+        labels = ([f for f in os.listdir(ldir) if f.lower().endswith(".txt")]
+                  if os.path.isdir(ldir) else [])
+        return len(imgs), len(labels), d
+
+    ni, nl, td = count(train_rel)
+    if ni is None:
+        return False, ["Train folder not found: %s" % td]
+    if ni == 0:
+        return False, ["No training images found in %s" % td]
+    msgs.append("Train: %d images, %d label files." % (ni, nl))
+    if nl == 0:
+        msgs.append("⚠ No label files next to the training images.")
+    elif nl < ni:
+        msgs.append("⚠ %d images have no label (used as background)."
+                    % (ni - nl))
+    if val_rel:
+        vi, vl, vd = count(val_rel)
+        if vi:
+            msgs.append("Val: %d images, %d label files." % (vi, vl))
+    return True, msgs
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

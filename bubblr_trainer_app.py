@@ -15,6 +15,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import zipfile
@@ -34,7 +35,37 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.17"
+from bubblr_train_core import (MODEL_URL, model_path, build_detect_script,
+                               detect_config)
+
+
+class AiModelFetcher(QThread):
+    """Download the shared model (bubblr-model.pt) in the background."""
+    done = pyqtSignal(object)                     # local path, or None
+
+    def run(self):
+        dest = model_path()
+        try:
+            import urllib.request
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            req = urllib.request.Request(MODEL_URL,
+                                         headers={"User-Agent": "BubblR"})
+            with urllib.request.urlopen(req, timeout=60) as r, \
+                    open(dest, "wb") as f:
+                f.write(r.read())
+            if os.path.getsize(dest) < 1024:
+                raise ValueError("no model published yet")
+            self.done.emit(dest)
+        except Exception:                        # noqa: BLE001
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+            except OSError:
+                pass
+            self.done.emit(None)
+
+
+VERSION = "0.9.18"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -238,6 +269,18 @@ LANG = {
         "rank_loaded": "Loaded the top {n} ranked page(s).",
         "m_file": "File", "m_edit": "Edit", "m_page": "Page",
         "m_tools": "Tools", "mi_train_model": "Train a model…",
+        "mi_get_model": "Download latest AI model",
+        "mi_ai_detect": "AI-detect boxes on this page",
+        "ai_downloading": "Downloading the latest AI model…",
+        "ai_model_ready": "AI model downloaded — use 'AI-detect boxes on this page'.",
+        "ai_model_none": "No model available yet (none published, or offline).",
+        "ai_need_model": "No AI model downloaded yet. Download the latest one now?",
+        "ai_no_env": "No Python env with Ultralytics found (the BubblR AI tool "
+                     "folder). Set it up first via File → Rank && load.",
+        "ai_detecting": "Detecting boxes with the AI…",
+        "ai_detect_fail": "AI detection failed (see the AI env / model).",
+        "ai_detect_none": "The AI found nothing on this page.",
+        "ai_detect_done": "AI added {n} box(es) — check and fix them.",
         "train_model_missing": "BubblR Model Trainer was not found next to this "
                                "app. Download it from the project's Releases page "
                                "(BubblR-Model-Trainer) and place it beside "
@@ -608,6 +651,21 @@ LANG = {
         "rank_loaded": "Top {n} gerankte Seite(n) geladen.",
         "m_file": "Datei", "m_edit": "Bearbeiten", "m_page": "Seite",
         "m_tools": "Werkzeuge", "mi_train_model": "Modell trainieren…",
+        "mi_get_model": "Neuestes KI-Modell laden",
+        "mi_ai_detect": "KI-Boxen auf dieser Seite erkennen",
+        "ai_downloading": "Neuestes KI-Modell wird geladen…",
+        "ai_model_ready": "KI-Modell geladen — nutze „KI-Boxen auf dieser Seite "
+                          "erkennen“.",
+        "ai_model_none": "Noch kein Modell verfügbar (nichts veröffentlicht oder "
+                         "offline).",
+        "ai_need_model": "Noch kein KI-Modell geladen. Jetzt das neueste laden?",
+        "ai_no_env": "Keine Python-Umgebung mit Ultralytics gefunden (der BubblR-"
+                     "AI-Ordner). Richte sie zuerst über Datei → Rank && load ein.",
+        "ai_detecting": "KI erkennt Boxen…",
+        "ai_detect_fail": "KI-Erkennung fehlgeschlagen (KI-Umgebung / Modell "
+                          "prüfen).",
+        "ai_detect_none": "Die KI hat auf dieser Seite nichts gefunden.",
+        "ai_detect_done": "KI hat {n} Box(en) hinzugefügt — prüfen und korrigieren.",
         "train_model_missing": "BubblR Model Trainer wurde nicht neben dieser App "
                                "gefunden. Lade ihn von der Releases-Seite des "
                                "Projekts (BubblR-Model-Trainer) und lege ihn "
@@ -3559,6 +3617,9 @@ class TrainerWindow(QMainWindow):
             ]),
             ("m_tools", [
                 ("mi_train_model", self._launch_model_trainer, None),
+                None,
+                ("mi_get_model", self._download_ai_model, None),
+                ("mi_ai_detect", self._ai_detect_page, None),
             ]),
             ("m_settings", self._open_settings),   # opens the Settings window
             ("m_help", [
@@ -3658,6 +3719,108 @@ class TrainerWindow(QMainWindow):
                     pass
         QMessageBox.information(self, self._tr("mi_train_model"),
                                 self._tr("train_model_missing"))
+
+    # -- shared AI model: download + pre-labelling ---------------------------
+    def _download_ai_model(self):
+        if getattr(self, "_aimodel_thread", None) is not None:
+            return
+        self._status(self._tr("ai_downloading"))
+        self._aimodel_thread = AiModelFetcher(self)
+        self._aimodel_thread.done.connect(self._on_ai_model_downloaded)
+        self._aimodel_thread.start()
+
+    def _on_ai_model_downloaded(self, path):
+        self._aimodel_thread = None
+        if path:
+            self._status(self._tr("ai_model_ready"))
+        else:
+            self._status(self._tr("ai_model_none"), error=True)
+
+    def _ai_detect_page(self):
+        """Run the shared model on the current page and add the detected boxes
+        (pre-labelling). Uses the BubblR AI tool's Python env (has ultralytics)."""
+        pg = self._page()
+        if not pg:
+            self._status(self._tr("no_page"), error=True)
+            return
+        mp = model_path()
+        if not os.path.isfile(mp):
+            if QMessageBox.question(
+                    self, self._tr("mi_get_model"), self._tr("ai_need_model"),
+                    QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                self._download_ai_model()
+            return
+        ai = self._find_ai_dir()
+        py = self._ai_python(ai) if ai else ""
+        if not py:
+            self._status(self._tr("ai_no_env"), error=True)
+            return
+        if getattr(self, "_detect_proc", None) is not None:
+            return
+        # source image: the page's file if present, else write the QImage to temp
+        src = pg.get("path", "")
+        if not src or not os.path.isfile(src):
+            src = os.path.join(tempfile.mkdtemp(prefix="bubblr_det_"), "page.png")
+            pg["img"].save(src, "PNG")
+        cfg = detect_config(mp, src, imgsz=max(320, min(1280,
+                            (pg["img"].width() // 32) * 32 or 640)))
+        d = tempfile.mkdtemp(prefix="bubblr_detect_")
+        sp = os.path.join(d, "detect.py")
+        cp = os.path.join(d, "cfg.json")
+        with open(sp, "w", encoding="utf-8") as f:
+            f.write(build_detect_script(cfg))
+        with open(cp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+        self._detect_page = pg
+        self._detect_out = []
+        self._status(self._tr("ai_detecting"))
+        self._detect_proc = QProcess(self)
+        self._detect_proc.setProcessChannelMode(QProcess.MergedChannels)
+        self._detect_proc.readyReadStandardOutput.connect(self._detect_output)
+        self._detect_proc.finished.connect(self._detect_finished)
+        self._detect_proc.start(py, ["-u", sp, cp])
+
+    def _detect_output(self):
+        data = bytes(self._detect_proc.readAllStandardOutput()).decode(
+            "utf-8", "replace")
+        for line in data.splitlines():
+            if line.startswith("BUBBLR_BOXES"):
+                try:
+                    self._detect_out = json.loads(line.split(" ", 1)[1])
+                except Exception:                # noqa: BLE001
+                    self._detect_out = []
+
+    def _detect_finished(self, code, _status):
+        self._detect_proc = None
+        pg = getattr(self, "_detect_page", None)
+        dets = getattr(self, "_detect_out", [])
+        if code != 0 or pg is None:
+            self._status(self._tr("ai_detect_fail"), error=True)
+            return
+        if not dets:
+            self._status(self._tr("ai_detect_none"))
+            return
+        W, H = pg["img"].width(), pg["img"].height()
+        keys = self._class_keys()
+        self._push_undo()
+        added = 0
+        for det in dets:
+            cw, ch = det["w"] * W, det["h"] * H
+            x = det["cx"] * W - cw / 2.0
+            y = det["cy"] * H - ch / 2.0
+            if cw < 4 or ch < 4:
+                continue
+            ci = int(det.get("cls", 0))
+            kind = keys[ci] if 0 <= ci < len(keys) else keys[0]
+            pg["boxes"].append({
+                "x": int(round(max(0, x))), "y": int(round(max(0, y))),
+                "w": int(round(cw)), "h": int(round(ch)),
+                "kind": kind, "order": 0, "shape": "rect"})
+            added += 1
+        self._current = len(pg["boxes"]) - 1 if added else self._current
+        self._maybe_auto_order()
+        self._refresh()
+        self._status(self._tr("ai_detect_done").format(n=added))
 
     def _open_settings(self):
         """Modal Settings window with a left-hand tab list: Display (language)

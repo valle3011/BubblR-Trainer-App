@@ -1,7 +1,14 @@
 {
-  "latest_version": "0.9.17",
+  "latest_version": "0.9.18",
+  "model_trainer_version": "0.3.0",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-12",
+      "title": "Shared AI model: pull from git & pre-label",
+      "text": "The apps can now download the latest shared model from the BubblR-Model repo. In the Model Trainer: 'Download latest' uses it as a base to continue training. In BubblR Trainer (Tools, experimental): 'Download latest AI model' + 'AI-detect boxes on this page' auto-labels a page for you to fix up. Model Trainer also gained test-on-image, error hints, dataset checks, resume/patience, an advanced section, ETA/metrics and its own icon.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-12",
       "title": "Model Trainer (experimental) + training guide",
