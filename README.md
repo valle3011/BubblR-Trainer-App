@@ -18,15 +18,22 @@ just want to label images.
   it creates the shortcut(s) with the app icon. No console, asked only once. You
   can also run **`make_shortcut.bat`** anytime to (re)create both (it targets the
   `.exe` if you built one, otherwise the Python app).
-- **Any OS / manually:**
+- **macOS / Linux / any OS (with Python):**
   ```
-  pip install PyQt5
-  python bubblr_trainer_app.py
+  pip3 install PyQt5
+  python3 bubblr_trainer_app.py
   ```
+  The app itself is cross-platform (PyQt5). The **`.exe` and the `.bat` files are
+  Windows-only**, and the desktop/Start-menu *shortcut* helper is skipped on
+  macOS/Linux (everything else — labelling, export, classes, Discord Rich
+  Presence via the local socket — works). To get a double-clickable **macOS
+  `.app`**, build it *on a Mac* with PyInstaller (`pyinstaller --windowed
+  --name "BubblR Trainer" bubblr_trainer_app.py`); PyInstaller can't
+  cross-compile, so a Windows `.exe` can't run on a Mac.
 
-> No Python yet? Install it from https://www.python.org/downloads/ and tick
-> "Add Python to PATH" during setup — only needed for `run.bat` / manual run,
-> not for the `.exe`.
+> No Python yet? Install it from https://www.python.org/downloads/ (Windows: tick
+> "Add Python to PATH"; macOS: `brew install python`) — only needed for the
+> manual / `run.bat` run, not for the prebuilt Windows `.exe`.
 
 ## Start page
 

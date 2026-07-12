@@ -3898,8 +3898,13 @@ class TrainerWindow(QMainWindow):
 
     @staticmethod
     def _ai_python(ai_dir):
-        p = os.path.join(ai_dir, ".venv", "Scripts", "python.exe")
-        return p if os.path.exists(p) else ""
+        # venv layout differs: Scripts/python.exe on Windows, bin/python elsewhere
+        for sub in (("Scripts", "python.exe"), ("bin", "python3"),
+                    ("bin", "python")):
+            p = os.path.join(ai_dir, ".venv", *sub)
+            if os.path.exists(p):
+                return p
+        return ""
 
     def on_rank_load(self):
         """Rank a folder of raw pages with the AI tool, then load the top ones."""
