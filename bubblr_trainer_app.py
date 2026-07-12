@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.9"
+VERSION = "6.0"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -247,7 +247,7 @@ LANG = {
                                 "dock or float it. Turn off to lock the layout.",
         "dock_tools": "Tools", "dock_boxes": "Boxes", "dock_pages": "Pages",
         "bar_actions": "Actions",
-        "mi_lock_panels": "Lock panels",
+        "mi_dockers": "Dockers", "mi_lock_panels": "Lock panels",
         "export_page": "Export this page", "export_all": "Export all pages",
         "ready": "Load page images to begin.",
         "loaded": "{n} image(s) loaded.",
@@ -465,7 +465,7 @@ LANG = {
                                 "Ausschalten sperrt das Layout.",
         "dock_tools": "Werkzeuge", "dock_boxes": "Boxen", "dock_pages": "Seiten",
         "bar_actions": "Aktionen",
-        "mi_lock_panels": "Panels sperren",
+        "mi_dockers": "Docker", "mi_lock_panels": "Panels sperren",
         "export_page": "Diese Seite exportieren", "export_all": "Alle Seiten exportieren",
         "ready": "Zum Start Seitenbilder laden.",
         "loaded": "{n} Bild(er) geladen.",
@@ -1849,14 +1849,24 @@ class TrainerWindow(QMainWindow):
                 "recent": self._recent[:40]}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
-            data["dockstate"] = bytes(self.saveState()).hex()
-            # explicit per-dock sizes: restoreState is unreliable for these, so
-            # we re-apply them ourselves with resizeDocks on the next start
-            sizes = {}
-            for d in getattr(self, "_docks", []):
-                sizes[d.objectName()] = {"w": d.width(), "h": d.height(),
-                                         "floating": d.isFloating()}
-            data["dock_sizes"] = sizes
+            # Only capture the docker layout while the EDITOR is showing. On the
+            # start page the docks are hidden, and saving that state would bring
+            # them back hidden next time (with no way to show them). Keep the
+            # last good editor layout instead.
+            if self._pages:
+                data["dockstate"] = bytes(self.saveState()).hex()
+                sizes = {}
+                for d in getattr(self, "_docks", []):
+                    sizes[d.objectName()] = {"w": d.width(), "h": d.height(),
+                                             "floating": d.isFloating()}
+                data["dock_sizes"] = sizes
+                self._pending_dockstate = data["dockstate"]
+                self._pending_dock_sizes = sizes
+            else:
+                if getattr(self, "_pending_dockstate", None):
+                    data["dockstate"] = self._pending_dockstate
+                if getattr(self, "_pending_dock_sizes", None):
+                    data["dock_sizes"] = self._pending_dock_sizes
         except Exception:                    # noqa: BLE001
             pass
         try:
@@ -2106,10 +2116,10 @@ class TrainerWindow(QMainWindow):
         # hide the editor chrome on the start page, like Krita's welcome screen
         self.top_bar.setVisible(not start)
         self.opt_bar.setVisible(not start)
-        for d in getattr(self, "_docks", []):
-            d.setVisible(not start)
         if not start:                        # entering the editor: restore docks
-            self._restore_layout_once()
+            self._restore_layout_once()      # may restore a hidden state...
+        for d in getattr(self, "_docks", []):
+            d.setVisible(not start)          # ...so force the right visibility
 
     def _unexported_count(self):
         """Pages that have boxes but have not been exported into the dataset."""
@@ -2182,6 +2192,8 @@ class TrainerWindow(QMainWindow):
                 self._apply_dock_lock()
             except Exception:                # noqa: BLE001
                 pass
+        for d in getattr(self, "_docks", []):    # never leave them hidden here
+            d.setVisible(True)
         # restoreState is unreliable for dock SIZES, so force them, and once
         # more after the layout settles (singleShot 0)
         self._restore_dock_sizes()
@@ -2395,6 +2407,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_zoom_sel", self.on_zoom_selection, "Z"),
                 ("mi_fit", lambda: self.overlay.fit(), None),
                 None,
+                ("mi_dockers", "__dockers__", None),
                 ("mi_lock_panels", "__lock__", None),
                 ("mi_discord", "__discord__", None),
             ]),
@@ -2418,6 +2431,12 @@ class TrainerWindow(QMainWindow):
                     menu.addSeparator()
                     continue
                 akey, fn, sc = item
+                if fn == "__dockers__":           # submenu: show/hide each dock
+                    sub = menu.addMenu(self._tr(akey))
+                    self._menu_titles.append((sub, akey))
+                    for d in getattr(self, "_docks", []):
+                        sub.addAction(d.toggleViewAction())
+                    continue
                 if fn == "__lock__":              # checkable "Lock panels" toggle
                     act = menu.addAction(self._tr(akey))
                     act.setCheckable(True)
