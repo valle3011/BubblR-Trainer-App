@@ -34,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.14"
+VERSION = "0.9.15"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -350,6 +350,11 @@ LANG = {
                            "train instance segmentation (task=segment). Polygon "
                            "and lasso shapes use their outline; other shapes use "
                            "the box (ellipses approximated).",
+        "coco_export_toggle": "Also write COCO JSON",
+        "coco_export_hint": "Additionally save annotations in COCO format "
+                            "(annotations.coco.json) next to the YOLO files — for "
+                            "Detectron2, MMDetection and other frameworks. Each "
+                            "object gets a bbox and a polygon.",
         "val_split_hint": "Put this share of pages into images/val + labels/val "
                           "instead of train (0 = all to train). The split is "
                           "stable per page, and data.yaml points val there.",
@@ -654,6 +659,11 @@ LANG = {
                            "Instanz-Segmentierung trainieren kannst "
                            "(task=segment). Polygon/Lasso nutzen ihren Umriss, "
                            "andere Formen die Box (Ellipsen angenähert).",
+        "coco_export_toggle": "Zusätzlich COCO-JSON schreiben",
+        "coco_export_hint": "Speichert die Annotationen zusätzlich im COCO-Format "
+                            "(annotations.coco.json) neben den YOLO-Dateien — für "
+                            "Detectron2, MMDetection u. a. Jedes Objekt erhält "
+                            "eine Box und ein Polygon.",
         "val_split_hint": "Diesen Anteil der Seiten nach images/val + labels/val "
                           "statt train exportieren (0 = alles nach train). Der "
                           "Split ist pro Seite stabil, und data.yaml zeigt darauf.",
@@ -2160,6 +2170,7 @@ class TrainerWindow(QMainWindow):
         self._export_summary_on = bool(cfg.get("export_summary", True))
         self._export_bg = bool(cfg.get("export_bg", False))  # empty pages as negs
         self._seg_export = bool(cfg.get("seg_export", False))  # YOLO-seg polygons
+        self._coco_export = bool(cfg.get("coco_export", False))  # + COCO JSON
         self._news_enabled = bool(cfg.get("news_enabled", True))
         self._auto_update = bool(cfg.get("auto_update", True))  # Krita-style
         self._update_zip = None                  # path once downloaded
@@ -2418,6 +2429,7 @@ class TrainerWindow(QMainWindow):
                 "export_summary": self._export_summary_on,
                 "export_bg": self._export_bg,
                 "seg_export": self._seg_export,
+                "coco_export": self._coco_export,
                 "news_enabled": self._news_enabled,
                 "auto_update": self._auto_update,
                 "pending_update": self._pending_update}
@@ -3916,6 +3928,20 @@ class TrainerWindow(QMainWindow):
         seg_hint.setWordWrap(True)
         seg_hint.setStyleSheet("color: gray;")
         sv.addWidget(seg_hint)
+        sv.addSpacing(12)
+        coco_box = QCheckBox()
+        coco_box.setChecked(self._coco_export)
+
+        def on_coco(on):
+            self._coco_export = bool(on)
+            self._save_settings()
+
+        coco_box.toggled.connect(on_coco)
+        sv.addWidget(coco_box)
+        coco_hint = QLabel()
+        coco_hint.setWordWrap(True)
+        coco_hint.setStyleSheet("color: gray;")
+        sv.addWidget(coco_hint)
         sv.addStretch(1)
 
         stack.addWidget(disp)
@@ -3985,6 +4011,8 @@ class TrainerWindow(QMainWindow):
             bg_hint.setText(tr("export_bg_hint"))
             seg_box.setText(tr("seg_export_toggle"))
             seg_hint.setText(tr("seg_export_hint"))
+            coco_box.setText(tr("coco_export_toggle"))
+            coco_hint.setText(tr("coco_export_hint"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -4954,6 +4982,62 @@ class TrainerWindow(QMainWindow):
         except OSError:
             pass
 
+    def _coco_dict(self, group):
+        """Build a COCO-format dict from [(stem, pg), …]. Every box carries a
+        bbox and a polygon segmentation (from its outline, or the box corners),
+        so the file works for both detection and segmentation frameworks."""
+        ci = self._class_index_map()
+        cats = [{"id": i + 1, "name": c["label"], "supercategory": "object"}
+                for i, c in enumerate(self._classes)]
+        images, annotations, ann_id = [], [], 1
+        for img_id, (stem, pg) in enumerate(group, start=1):
+            w, h = pg["img"].width(), pg["img"].height()
+            images.append({"id": img_id, "file_name": stem + ".png",
+                           "width": w, "height": h})
+            for b in pg["boxes"]:
+                cat = ci.get(b.get("kind", "bubble"), 0) + 1   # COCO ids are 1+
+                bx, by = float(b["x"]), float(b["y"])
+                bw, bh = float(b["w"]), float(b["h"])
+                seg = []
+                poly = _box_polygon(b)
+                if poly and len(poly) >= 3:
+                    flat = []
+                    for px, py in poly:
+                        flat += [round(float(px), 1), round(float(py), 1)]
+                    seg = [flat]
+                annotations.append({
+                    "id": ann_id, "image_id": img_id, "category_id": cat,
+                    "bbox": [round(bx, 1), round(by, 1),
+                             round(bw, 1), round(bh, 1)],
+                    "area": round(bw * bh, 1), "iscrowd": 0,
+                    "segmentation": seg})
+                ann_id += 1
+        return {"images": images, "annotations": annotations,
+                "categories": cats}
+
+    def _write_coco(self, base, records):
+        """Write COCO JSON alongside the YOLO export. One file per split when a
+        validation split is used, otherwise a single annotations.coco.json."""
+        try:
+            if self._val_split > 0:
+                groups = {
+                    "annotations.train.coco.json":
+                        [(s, pg) for s, pg, tv in records if not tv],
+                    "annotations.val.coco.json":
+                        [(s, pg) for s, pg, tv in records if tv],
+                }
+            else:
+                groups = {"annotations.coco.json":
+                          [(s, pg) for s, pg, _tv in records]}
+            for fname, group in groups.items():
+                if not group:
+                    continue
+                with open(os.path.join(base, fname), "w",
+                          encoding="utf-8") as fh:
+                    json.dump(self._coco_dict(group), fh, indent=2)
+        except OSError:
+            pass
+
     def on_export(self, all_pages):
         pages = self._pages if all_pages else ([self._page()] if self._page() else [])
         # Keep labelled pages; optionally add empty pages as background/negatives
@@ -4983,14 +5067,18 @@ class TrainerWindow(QMainWindow):
             for d in dirs:
                 os.makedirs(d, exist_ok=True)
             last = ""
+            records = []               # (stem, pg, to_val) for optional COCO
             for pg in pages:
                 to_val = (self._val_split > 0
                           and self._page_bucket(pg) < self._val_split)
                 imgs = images_va if to_val else images_tr
                 lbls = labels_va if to_val else labels_tr
                 last = self._export_page(pg, imgs, lbls, order, preview)
+                records.append((last, pg, to_val))
                 time.sleep(0.002)      # keep timestamp stems unique
             self._write_class_files()  # classes.txt + data.yaml for YOLO
+            if self._coco_export:
+                self._write_coco(base, records)
         except Exception as exc:
             self._status(self._tr("export_fail").format(msg=exc), error=True)
             return

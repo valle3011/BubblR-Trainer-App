@@ -214,7 +214,16 @@ preview/<page>_<id>.png        the page with boxes + reading-order numbers drawn
 classes.txt                    one class name per line (index order)
 data.yaml                      YOLO / Ultralytics dataset config (path, train,
                                val, nc, names) — train straight from it
+annotations.coco.json          optional COCO file (if "Also write COCO JSON" is
+                               on) — one per split when a val split is used
 ```
+
+**COCO JSON:** turn on *Also write COCO JSON* (*Settings → Storage location*) to
+additionally save annotations in **COCO format** next to the YOLO files — for
+Detectron2, MMDetection and other frameworks. Each object gets a `bbox`, an
+`area` and a polygon `segmentation`; empty pages become background images with no
+annotations. With a validation split you get `annotations.train.coco.json` +
+`annotations.val.coco.json`.
 
 Set a **validation split** under *Settings → Storage location* (e.g. 10–20 %):
 that share of pages goes to `images/val` + `labels/val` instead of `train`, the

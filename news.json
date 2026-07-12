@@ -1,11 +1,17 @@
 {
-  "latest_version": "0.9.14",
+  "latest_version": "0.9.15",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
     {
       "date": "2026-07-12",
+      "title": "COCO JSON export",
+      "text": "Turn on 'Also write COCO JSON' (Settings → Storage) to save annotations in COCO format next to the YOLO files — for Detectron2, MMDetection and other frameworks. Each object gets a bbox, area and polygon; with a val split you get separate train/val files.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-12",
       "title": "Segmentation export (YOLO-seg)",
-      "text": "Turn on 'Export segmentation labels' (Settings → Storage) to write polygon outlines instead of boxes, so you can train instance segmentation (task=segment). Polygon and lasso shapes use their outline; other shapes use the box. Pairs perfectly with the new Polygon tool.",
+      "text": "Turn on 'Export segmentation labels' (Settings → Storage) to write polygon outlines instead of boxes, so you can train instance segmentation. Pairs with the Polygon tool.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {
@@ -19,11 +25,6 @@
       "title": "Updates tab & seamless auto-update",
       "text": "Settings → Updates: choose Automatic or Manual, install a specific version to roll back, and see your current version. Updates install themselves on next start with no restart prompt.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
-    },
-    {
-      "date": "2026-07-12",
-      "title": "Background images & custom classes",
-      "text": "Export empty pages as YOLO negatives, define your own detection classes, and export classes.txt + data.yaml with an optional train/val split — train any object detector, not just manga bubbles."
     }
   ]
 }
