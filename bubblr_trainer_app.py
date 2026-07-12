@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.4"
+VERSION = "5.5"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -38,6 +38,16 @@ SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_trainer_shortcut_asked")
 RECOVERY_FILE = os.path.join(os.path.expanduser("~"),
                              ".bubblr_trainer_recovery.json")
+
+# A Discord "Application ID" is PUBLIC (not a secret, unlike the client secret /
+# bot token) and is meant to be shared: every user of this app can enable Rich
+# Presence with the SAME id and Discord shows the app's name to all of them.
+# Create ONE free application at discord.com/developers/applications named
+# "BubblR Trainer" (optionally upload an art asset called "icon" under Rich
+# Presence -> Art Assets), then paste its Application ID here so presence works
+# for everyone out of the box, with no per-user setup. Leave "" to disable the
+# built-in id (users can still enter their own in Settings -> Discord).
+DEFAULT_DISCORD_CLIENT_ID = ""
 
 LANG = {
     "en": {
@@ -210,13 +220,14 @@ LANG = {
         "mi_discord": "Show on Discord",
         "discord_need_id": "Set your Discord Application ID in Settings → Discord.",
         "discord_enable": "Show “in BubblR Trainer” on Discord",
-        "discord_id": "Discord Application ID",
-        "discord_hint": "Rich Presence needs a free Discord application. Open "
-                        "discord.com/developers/applications → New Application, "
-                        "name it “BubblR Trainer”, copy its Application ID "
-                        "(General Information) and paste it above. Optionally upload "
-                        "an art asset named “icon” under Rich Presence → "
-                        "Art Assets. Discord must be running on the same PC.",
+        "discord_id": "Discord Application ID (optional)",
+        "discord_hint": "Leave empty to use the built-in “BubblR Trainer” app — "
+                        "then it just works (Discord must be running on the same "
+                        "PC). Only fill this in to use your OWN Discord "
+                        "application: create one at "
+                        "discord.com/developers/applications and paste its "
+                        "Application ID. (An Application ID is public, not a "
+                        "secret.)",
         "settings_newbox_hint": "The class a freshly drawn box gets. You can "
                                 "still change any box later with the right-click "
                                 "menu or the B / S keys.",
@@ -419,14 +430,14 @@ LANG = {
         "discord_need_id": "Trage deine Discord-Application-ID unter "
                            "Einstellungen → Discord ein.",
         "discord_enable": "„in BubblR Trainer“ auf Discord anzeigen",
-        "discord_id": "Discord-Application-ID",
-        "discord_hint": "Rich Presence braucht eine kostenlose Discord-Anwendung. "
-                        "Öffne discord.com/developers/applications → New "
-                        "Application, nenne sie „BubblR Trainer“, kopiere die "
-                        "Application ID (General Information) und füge sie oben "
-                        "ein. Optional unter Rich Presence → Art Assets ein Bild "
-                        "namens „icon“ hochladen. Discord muss auf demselben PC "
-                        "laufen.",
+        "discord_id": "Discord-Application-ID (optional)",
+        "discord_hint": "Leer lassen, um die eingebaute „BubblR Trainer“-App zu "
+                        "nutzen — dann funktioniert es sofort (Discord muss auf "
+                        "demselben PC laufen). Nur ausfüllen, wenn du deine "
+                        "EIGENE Discord-Anwendung verwenden willst: eine unter "
+                        "discord.com/developers/applications anlegen und die "
+                        "Application ID einfügen. (Eine Application ID ist "
+                        "öffentlich, kein Geheimnis.)",
         "settings_newbox_hint": "Die Klasse, die eine neu gezeichnete Box "
                                 "bekommt. Jede Box lässt sich später per "
                                 "Rechtsklick-Menü oder mit den Tasten B / S ändern.",
@@ -1943,11 +1954,15 @@ class TrainerWindow(QMainWindow):
                    if p["boxes"] and not p.get("exported"))
 
     # -- Discord Rich Presence ------------------------------------------------
+    def _effective_discord_id(self):
+        """The id to use: the user's own if set, else the built-in default."""
+        return (self._discord_id.strip() or DEFAULT_DISCORD_CLIENT_ID).strip()
+
     def _toggle_discord(self, on):
         """Quick on/off from the View menu (mirrors the Settings checkbox)."""
         self._discord_enabled = bool(on)
         self._save_settings()
-        if on and not self._discord_id.strip():
+        if on and not self._effective_discord_id():
             self._status(self._tr("discord_need_id"), error=True)
         self._start_discord()
 
@@ -1956,8 +1971,9 @@ class TrainerWindow(QMainWindow):
         if self._discord is not None:
             self._discord.stop()
             self._discord = None
-        if self._discord_enabled and self._discord_id.strip():
-            self._discord = DiscordPresence(self._discord_id.strip())
+        cid = self._effective_discord_id()
+        if self._discord_enabled and cid:
+            self._discord = DiscordPresence(cid)
             self._discord.start()
             self._update_discord()
         # keep the View-menu toggle in sync with the current state

@@ -188,11 +188,16 @@ Classes: **bubble = 0**, **sfx = 1**.
   Presence — see below) and **Storage location** (dataset/export folder). All
   stored in `~/.bubblr_trainer.json`.
 - **Discord Rich Presence** *(optional):* show “in BubblR Trainer” with your
-  current page/progress on your Discord profile. Create a free app at
-  *discord.com/developers/applications*, name it **BubblR Trainer**, copy its
-  **Application ID** into *Settings → Discord* and tick the box (Discord must be
-  running on the same PC). No extra install — it talks to Discord's local
-  socket from a background thread and does nothing if Discord isn't there.
+  current page/progress on your Discord profile. Just tick *View → Show on
+  Discord* (or *Settings → Discord*) — a **built-in Application ID is used, so
+  no per-user setup is needed** (Discord must be running on the same PC). Power
+  users can paste their own Application ID in *Settings → Discord* to show a
+  different name. No extra install — it talks to Discord's local socket from a
+  background thread and does nothing if Discord isn't there.
+  - *(For the maintainer)* the built-in id is `DEFAULT_DISCORD_CLIENT_ID` near
+    the top of `bubblr_trainer_app.py`: create one free application named
+    *BubblR Trainer*, upload an `icon` art asset, and paste its **public**
+    Application ID there so it works for everyone.
 - Bilingual (English / Deutsch) — switch it under Settings → Display.
 - **Make a no-Python `.exe`:** double-click **`build_exe.bat`** (installs
   PyInstaller if needed, then builds). Result: the folder
