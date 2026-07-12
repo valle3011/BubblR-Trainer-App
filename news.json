@@ -1,11 +1,17 @@
 {
-  "latest_version": "0.9.12",
+  "latest_version": "0.9.13",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
     {
       "date": "2026-07-12",
+      "title": "New Polygon tool",
+      "text": "Click to drop points connected by straight lines (no dragging) and close the shape by clicking the first point, double-clicking or pressing Enter. Backspace removes the last point, Esc cancels. Perfect for irregular SFX shapes.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-12",
       "title": "Updates tab: automatic or manual, pick any version",
-      "text": "New Settings → Updates tab. Choose Automatic (download + install on next start) or Manual (an Update button appears with the new version next to it — you decide when). You can also install a specific version from a dropdown to roll back, and your current version is shown at the bottom.",
+      "text": "New Settings → Updates tab. Choose Automatic (install on next start) or Manual (an Update button appears with the new version). You can also install a specific version to roll back, and your current version is shown at the bottom.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {
@@ -16,14 +22,8 @@
     },
     {
       "date": "2026-07-12",
-      "title": "Background images & smarter export summary",
-      "text": "Export empty pages as YOLO negatives (Settings → Storage) to reduce false detections. The export summary counts negatives and warns about empty or imbalanced classes.",
-      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
-    },
-    {
-      "date": "2026-07-12",
-      "title": "Custom classes & YOLO export",
-      "text": "Define your own detection classes (Settings → Classes), import them from a classes.txt / data.yaml, and export classes.txt + data.yaml with an optional train/val split — train any object detector, not just manga bubbles."
+      "title": "Background images & custom classes",
+      "text": "Export empty pages as YOLO negatives, define your own detection classes, and export classes.txt + data.yaml with an optional train/val split — train any object detector, not just manga bubbles."
     }
   ]
 }

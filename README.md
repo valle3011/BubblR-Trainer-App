@@ -102,6 +102,10 @@ shown at the bottom of the tab.
    - **▭ Rectangle** — the classic corner-to-corner box.
    - **◯ Ellipse** — drag an oval (nice for round bubbles); the saved box is its
      bounding rectangle.
+   - **⬠ Polygon** — *click* to drop points connected by straight lines (you
+     don't drag). Click the first point again, double-click, or press **Enter**
+     to close; **Backspace** removes the last point, **Esc** cancels. Great for
+     irregular SFX. The saved box is the outline's bounding rectangle.
    - **✎ Lasso** — draw a freehand outline; the box wraps tightly around it.
    - **✨ Magic wand** — *click once* inside a bubble and it auto-detects the
      same-colour region and boxes it. Set the **wand tolerance** under

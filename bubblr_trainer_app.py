@@ -34,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.12"
+VERSION = "0.9.13"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -144,10 +144,14 @@ LANG = {
         "tool": "Tool:",
         "tool_rect": "▭ Rectangle",
         "tool_ellipse": "◯ Ellipse",
+        "tool_poly": "⬠ Polygon",
         "tool_lasso": "✎ Lasso",
         "tool_wand": "✨ Magic wand",
         "tool_rect_hint": "Drag a rectangle corner-to-corner.",
         "tool_ellipse_hint": "Drag an ellipse; the box is its bounding rectangle.",
+        "tool_poly_hint": "Polygon: click to add points; click the first point, "
+                          "double-click or Enter to close. Backspace undoes a "
+                          "point, Esc cancels.",
         "tool_lasso_hint": "Draw a freehand outline; the box wraps around it.",
         "tool_wand_hint": "Click inside a bubble to auto-detect its region.",
         "wand_tol": "Wand tol.",
@@ -432,10 +436,14 @@ LANG = {
         "tool": "Werkzeug:",
         "tool_rect": "▭ Rechteck",
         "tool_ellipse": "◯ Ellipse",
+        "tool_poly": "⬠ Polygon",
         "tool_lasso": "✎ Lasso",
         "tool_wand": "✨ Zauberstab",
         "tool_rect_hint": "Rechteck von Ecke zu Ecke ziehen.",
         "tool_ellipse_hint": "Ellipse ziehen; die Box ist ihr umschließendes Rechteck.",
+        "tool_poly_hint": "Polygon: klicken, um Punkte zu setzen; ersten Punkt "
+                          "anklicken, Doppelklick oder Enter zum Schließen. "
+                          "Rücktaste nimmt einen Punkt zurück, Esc bricht ab.",
         "tool_lasso_hint": "Freihand-Umriss zeichnen; die Box umschließt ihn.",
         "tool_wand_hint": "In eine Blase klicken, um ihren Bereich automatisch zu erkennen.",
         "wand_tol": "Zauberst.-Tol.",
@@ -833,7 +841,7 @@ def auto_order(boxes, rtl=True):
 class BoxOverlay(QWidget):
     boxClicked = pyqtSignal(int)
     boxRemoved = pyqtSignal(int)
-    # x, y, w, h, shape ("rect"/"ellipse"/"lasso"/"wand"), points (list or None)
+    # x,y,w,h, shape ("rect"/"ellipse"/"poly"/"lasso"/"wand"), points (list|None)
     boxAdded = pyqtSignal(float, float, float, float, str, object)
     boxChanged = pyqtSignal(int, float, float, float, float)
     rubberSelect = pyqtSignal(float, float, float, float)  # x, y, w, h in doc
@@ -861,7 +869,9 @@ class BoxOverlay(QWidget):
         self._pan_y = 0.0
         self._panning = None      # last pos while middle-drag panning
         self._rubber = None       # rubber-band rectangle while view-mode drag
-        self._tool = "rect"       # rect | ellipse | lasso | wand
+        self._tool = "rect"       # rect | ellipse | poly | lasso | wand
+        self._poly = None         # in-progress polygon: list of (dx, dy) vertices
+        self._poly_cursor = None  # live cursor point while placing polygon points
         self._show_center = True  # draw a marker at each box's centre
         self._show_order_path = False  # draw the 1->2->3 reading-order path
         self._kind_filter = None       # None | class key (show only that class)
@@ -877,14 +887,55 @@ class BoxOverlay(QWidget):
     def set_edit_mode(self, on):
         self._edit = bool(on)
         self._drag = None
+        self._cancel_poly()
         self.setCursor(Qt.CrossCursor if on else Qt.ArrowCursor)
         self.update()
 
     def set_tool(self, name):
-        if name in ("rect", "ellipse", "lasso", "wand"):
+        if name in ("rect", "ellipse", "poly", "lasso", "wand"):
+            self._cancel_poly()          # dropping the poly tool cancels a draw
             self._tool = name
             self._drag = None
             self.update()
+
+    def _cancel_poly(self):
+        self._poly = None
+        self._poly_cursor = None
+
+    def _poly_click(self, dx, dy):
+        """Add a polygon vertex, or close the shape when clicking near the
+        first point (needs at least 3 points)."""
+        if self._poly is None:
+            self._poly = [(dx, dy)]
+            self._poly_cursor = (dx, dy)
+            self.update()
+            return
+        t = self._target()
+        scale = t.width() / float(self._doc_w) if t.width() > 0 else 1.0
+        tol = 10.0 / max(scale, 1e-6)            # ~10 screen px, in doc units
+        fx, fy = self._poly[0]
+        if len(self._poly) >= 3 and abs(dx - fx) <= tol and abs(dy - fy) <= tol:
+            self._finish_poly()
+            return
+        self._poly.append((dx, dy))
+        self._poly_cursor = (dx, dy)
+        self.update()
+
+    def _finish_poly(self):
+        pts = self._poly or []
+        self._poly = None
+        self._poly_cursor = None
+        self.update()
+        if len(pts) < 3:
+            return
+        xs = [px for px, _ in pts]
+        ys = [py for _, py in pts]
+        x, y, w, h = self._clamp(min(xs), min(ys),
+                                 max(xs) - min(xs), max(ys) - min(ys))
+        if w < 8 or h < 8:
+            return
+        points = [[round(px, 1), round(py, 1)] for px, py in pts]
+        self.boxAdded.emit(x, y, w, h, "poly", points)
 
     def set_center_marker(self, on):
         self._show_center = bool(on)
@@ -1069,6 +1120,28 @@ class BoxOverlay(QWidget):
             p.fillRect(tag, QColor(60, 200, 90))
             p.setPen(QPen(QColor(255, 255, 255)))
             p.drawText(tag, Qt.AlignCenter, info)
+        # live preview of the polygon being placed (click-to-add-point tool)
+        if self._poly:
+            g = QColor(60, 200, 90)
+            pts = [QPointF(t.x() + px * scale, t.y() + py * scale)
+                   for px, py in self._poly]
+            p.setBrush(Qt.NoBrush)
+            if len(pts) >= 2:
+                p.setPen(QPen(g, 2))
+                p.drawPolyline(QPolygonF(pts))
+            cur = self._poly_cursor
+            if cur is not None:
+                cp = QPointF(t.x() + cur[0] * scale, t.y() + cur[1] * scale)
+                p.setPen(QPen(g, 1, Qt.DashLine))
+                p.drawLine(pts[-1], cp)
+                if len(pts) >= 2:                # hint the closing edge
+                    p.drawLine(cp, pts[0])
+            p.setPen(QPen(QColor(20, 40, 20), 1))
+            for i, vp in enumerate(pts):
+                # a bigger dot on the first vertex marks where to click to close
+                rad = 5.0 if i == 0 else 3.5
+                p.setBrush(QBrush(QColor(255, 235, 120) if i == 0 else g))
+                p.drawEllipse(vp, rad, rad)
         # rubber-band selection rectangle
         if self._rubber is not None:
             rx, ry, rw, rh = self._norm(self._rubber["x0"], self._rubber["y0"],
@@ -1084,7 +1157,7 @@ class BoxOverlay(QWidget):
         """Outline a box as a rectangle, ellipse or lasso polygon."""
         if shape == "ellipse":
             p.drawEllipse(r)
-        elif shape == "lasso" and points:
+        elif shape in ("lasso", "poly") and points:
             poly = QPolygonF([QPointF(t.x() + px * scale, t.y() + py * scale)
                               for px, py in points])
             if closed:
@@ -1302,8 +1375,26 @@ class BoxOverlay(QWidget):
             self._rubber = {"x0": dx, "y0": dy, "cx": dx, "cy": dy}
 
     def keyPressEvent(self, event):
-        # arrow keys nudge the selected box (Shift = 10 px); pan otherwise
         k = event.key()
+        # polygon in progress: Enter closes, Esc cancels, Backspace undoes a point
+        if self._tool == "poly" and self._poly is not None:
+            if k in (Qt.Key_Return, Qt.Key_Enter):
+                self._finish_poly()
+                event.accept()
+                return
+            if k == Qt.Key_Escape:
+                self._cancel_poly()
+                self.update()
+                event.accept()
+                return
+            if k in (Qt.Key_Backspace, Qt.Key_Delete):
+                self._poly.pop()
+                if not self._poly:
+                    self._cancel_poly()
+                self.update()
+                event.accept()
+                return
+        # arrow keys nudge the selected box (Shift = 10 px); pan otherwise
         arrows = (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down)
         if k in arrows and 0 <= self._current < len(self._boxes):
             mods = event.modifiers()
@@ -1332,6 +1423,11 @@ class BoxOverlay(QWidget):
 
     def _begin_edit(self, pos):
         dx, dy = self._to_doc(pos)
+        # Polygon tool: each click drops a vertex; clicking near the first point
+        # (or Enter / double-click) closes the shape. It never drags.
+        if self._tool == "poly":
+            self._poly_click(dx, dy)
+            return
         hit = self._handle_at(pos)
         # resizing an existing box (grabbing a corner or edge) always wins
         if hit is not None and hit[1] != "move":
@@ -1381,6 +1477,12 @@ class BoxOverlay(QWidget):
         if not self._edit:
             return
         if self._drag is None:
+            # polygon in progress: rubber-band the next edge to the cursor
+            if self._tool == "poly" and self._poly is not None:
+                self._poly_cursor = self._to_doc(event.pos())
+                self.setCursor(Qt.CrossCursor)
+                self.update()
+                return
             # hover feedback: resize/move cursor over a handle, else crosshair
             hit = self._handle_at(event.pos())
             self.setCursor(self._cursor_for(hit[1]) if hit else Qt.CrossCursor)
@@ -1426,6 +1528,14 @@ class BoxOverlay(QWidget):
             self.boxAdded.emit(x, y, w, h, shape, points)
         else:
             self.boxChanged.emit(d["idx"], x, y, w, h)
+
+    def mouseDoubleClickEvent(self, event):
+        # double-click closes the polygon being placed
+        if (self._edit and self._tool == "poly" and self._poly is not None
+                and event.button() == Qt.LeftButton):
+            self._finish_poly()
+            return
+        super(BoxOverlay, self).mouseDoubleClickEvent(event)
 
     def _magic_wand(self, dx, dy):
         """Flood-fill a same-colour region from (dx, dy); return its bbox."""
@@ -1618,6 +1728,14 @@ def make_tool_icon(kind, size=24):
         pen.setStyle(Qt.DashLine)
         p.setPen(pen)
         p.drawEllipse(m, m, size - 2 * m, size - 2 * m)
+    elif kind == "poly":                     # polygon: straight edges + vertices
+        verts = [QPointF(size * 0.5, m), QPointF(size - m, size * 0.42),
+                 QPointF(size - m - 3, size - m), QPointF(m + 3, size - m - 2),
+                 QPointF(m, size * 0.4)]
+        p.drawPolygon(QPolygonF(verts))
+        p.setBrush(QBrush(ink))
+        for v in verts:                      # little handles at each corner
+            p.drawEllipse(v, 1.5, 1.5)
     elif kind == "lasso":                    # freehand / polygon lasso loop
         poly = QPolygonF([
             QPointF(m + 1, size - m), QPointF(m, m + 4),
@@ -2131,7 +2249,7 @@ class TrainerWindow(QMainWindow):
         self._tg = QButtonGroup(self)
         self._tg.setExclusive(True)
         self.tool_btns = {}
-        for _key in ("rect", "ellipse", "lasso", "wand"):
+        for _key in ("rect", "ellipse", "poly", "lasso", "wand"):
             btn = QToolButton()
             btn.setCheckable(True)
             btn.setIcon(make_tool_icon(_key))
@@ -2298,7 +2416,7 @@ class TrainerWindow(QMainWindow):
         tv.setContentsMargins(4, 4, 4, 4)
         flow_host = QWidget()
         self._tools_flow = FlowLayout(flow_host, margin=0, spacing=4)
-        for k in ("rect", "ellipse", "lasso", "wand"):
+        for k in ("rect", "ellipse", "poly", "lasso", "wand"):
             self._tools_flow.addWidget(self.tool_btns[k])
         tv.addWidget(flow_host)
         tv.addStretch(1)
