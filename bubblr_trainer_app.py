@@ -31,7 +31,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "0.9.4"
+VERSION = "0.9.5"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -288,6 +288,10 @@ LANG = {
         "order_cleared": "Reading order cleared.",
         "exported_one": "Exported: {name}",
         "exported_all": "Exported {n} page(s) to the dataset folder.",
+        "summary_title": "Export summary",
+        "summary_pages": "Exported {n} page(s)  —  {tr} train, {va} val.",
+        "summary_objects": "Objects per class:",
+        "summary_total": "Total: {n} box(es).",
         "export_fail": "Export failed: {msg}",
         "saved": "Project saved.", "loaded_proj": "Project loaded ({n} page(s)).",
         "load_fail": "Could not load: {msg}",
@@ -526,6 +530,10 @@ LANG = {
         "order_cleared": "Lesereihenfolge gelöscht.",
         "exported_one": "Exportiert: {name}",
         "exported_all": "{n} Seite(n) in den Datensatz-Ordner exportiert.",
+        "summary_title": "Export-Zusammenfassung",
+        "summary_pages": "{n} Seite(n) exportiert  —  {tr} train, {va} val.",
+        "summary_objects": "Objekte pro Klasse:",
+        "summary_total": "Gesamt: {n} Box(en).",
         "export_fail": "Export fehlgeschlagen: {msg}",
         "saved": "Projekt gespeichert.", "loaded_proj": "Projekt geladen ({n} Seite(n)).",
         "load_fail": "Konnte nicht laden: {msg}",
@@ -4087,8 +4095,32 @@ class TrainerWindow(QMainWindow):
             self._rebuild_page_strip()     # show the fresh ✓ export markers
         if all_pages:
             self._status(self._tr("exported_all").format(n=len(pages)))
+            self._show_export_summary(pages)
         else:
             self._status(self._tr("exported_one").format(name=last + ".png"))
+
+    def _show_export_summary(self, pages):
+        """A short recap after an 'export all': pages, train/val split and how
+        many objects of each class went out."""
+        counts = {c["key"]: 0 for c in self._classes}
+        train = val = 0
+        for pg in pages:
+            if self._val_split > 0 and self._page_bucket(pg) < self._val_split:
+                val += 1
+            else:
+                train += 1
+            for b in pg["boxes"]:
+                k = b.get("kind", "bubble")
+                counts[k] = counts.get(k, 0) + 1
+        total = sum(counts.values())
+        t = self._tr
+        lines = [t("summary_pages").format(n=len(pages), tr=train, va=val), ""]
+        lines.append(t("summary_objects"))
+        for c in self._classes:
+            lines.append("   %s: %d" % (c["label"], counts.get(c["key"], 0)))
+        lines += ["", t("summary_total").format(n=total),
+                  "", "%s" % os.path.abspath(self._folder)]
+        QMessageBox.information(self, t("summary_title"), "\n".join(lines))
 
     def on_save_project(self):
         start = os.path.join(self._start_dir(), "project.json")
