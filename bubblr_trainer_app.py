@@ -31,7 +31,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "0.9.6"
+VERSION = "0.9.7"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -267,6 +267,7 @@ LANG = {
                                 "menu or the B / S keys.",
         "settings_folder_title": "Dataset / export folder",
         "val_split": "Validation split:",
+        "export_summary_toggle": "Show the summary dialog after Export all",
         "val_split_hint": "Put this share of pages into images/val + labels/val "
                           "instead of train (0 = all to train). The split is "
                           "stable per page, and data.yaml points val there.",
@@ -507,6 +508,7 @@ LANG = {
                                 "Rechtsklick-Menü oder mit den Tasten B / S ändern.",
         "settings_folder_title": "Dataset-/Export-Ordner",
         "val_split": "Validierungs-Anteil:",
+        "export_summary_toggle": "Zusammenfassungs-Dialog nach „Export all“ zeigen",
         "val_split_hint": "Diesen Anteil der Seiten nach images/val + labels/val "
                           "statt train exportieren (0 = alles nach train). Der "
                           "Split ist pro Seite stabil, und data.yaml zeigt darauf.",
@@ -1688,6 +1690,7 @@ class TrainerWindow(QMainWindow):
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
+        self._export_summary_on = bool(cfg.get("export_summary", True))
         self._auto_order = bool(cfg.get("auto_order_on", False))
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._center = bool(cfg.get("center_marker", True))  # in Settings now
@@ -1936,7 +1939,8 @@ class TrainerWindow(QMainWindow):
                 "discord_enabled": self._discord_enabled,
                 "discord_client_id": self._discord_id,
                 "recent": self._recent[:40], "classes": self._classes,
-                "val_split": self._val_split}
+                "val_split": self._val_split,
+                "export_summary": self._export_summary_on}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             # Only capture the docker layout while the EDITOR is showing AND the
@@ -3046,6 +3050,16 @@ class TrainerWindow(QMainWindow):
         val_hint.setWordWrap(True)
         val_hint.setStyleSheet("color: gray;")
         sv.addWidget(val_hint)
+        sv.addSpacing(12)
+        summ_box = QCheckBox()
+        summ_box.setChecked(self._export_summary_on)
+
+        def on_summ(on):
+            self._export_summary_on = bool(on)
+            self._save_settings()
+
+        summ_box.toggled.connect(on_summ)
+        sv.addWidget(summ_box)
         sv.addStretch(1)
 
         stack.addWidget(disp)
@@ -3097,6 +3111,7 @@ class TrainerWindow(QMainWindow):
             path_lbl.setText(self._folder or tr("settings_folder_none"))
             val_lbl.setText(tr("val_split"))
             val_hint.setText(tr("val_split_hint"))
+            summ_box.setText(tr("export_summary_toggle"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -4101,7 +4116,8 @@ class TrainerWindow(QMainWindow):
             self._rebuild_page_strip()     # show the fresh ✓ export markers
         if all_pages:
             self._status(self._tr("exported_all").format(n=len(pages)))
-            self._show_export_summary(pages)
+            if self._export_summary_on:
+                self._show_export_summary(pages)
         else:
             self._status(self._tr("exported_one").format(name=last + ".png"))
 
