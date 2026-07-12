@@ -180,6 +180,9 @@ order/<page>_<id>.json         boxes sorted by reading order (+ class)
 preview/<page>_<id>.png        the page with boxes + reading-order numbers drawn
                                (and the order path if "Order path" is on) to
                                check by eye
+classes.txt                    one class name per line (index order)
+data.yaml                      YOLO / Ultralytics dataset config (path, train,
+                               val, nc, names) — train straight from it
 ```
 
 Classes: **bubble = 0**, **sfx = 1** by default.

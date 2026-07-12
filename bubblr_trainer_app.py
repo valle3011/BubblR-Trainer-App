@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "0.9.1"
+VERSION = "0.9.2"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -3895,6 +3895,34 @@ class TrainerWindow(QMainWindow):
         pg["exported"] = True         # mark it saved so the strip shows a ✓
         return stem
 
+    def _write_class_files(self):
+        """Write classes.txt + data.yaml to the dataset root so the export can be
+        trained with YOLO/Ultralytics straight away."""
+        if not self._folder or not os.path.isdir(self._folder):
+            return
+        names = [c["label"] for c in self._classes]
+        try:
+            with open(os.path.join(self._folder, "classes.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("\n".join(names) + "\n")
+            root = os.path.abspath(self._folder).replace("\\", "/")
+            lines = [
+                "# BubblR Trainer export — YOLO / Ultralytics dataset config",
+                "path: %s" % root,
+                "train: images/train",
+                "val: images/train        # no held-out split is made here",
+                "nc: %d" % len(names),
+                "names:",
+            ]
+            for i, n in enumerate(names):
+                safe = n.replace('"', "'")
+                lines.append('  %d: "%s"' % (i, safe))
+            with open(os.path.join(self._folder, "data.yaml"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+        except OSError:
+            pass
+
     def on_export(self, all_pages):
         pages = self._pages if all_pages else ([self._page()] if self._page() else [])
         pages = [p for p in pages if p and p["boxes"]]
@@ -3918,6 +3946,7 @@ class TrainerWindow(QMainWindow):
             for pg in pages:
                 last = self._export_page(pg, images, labels, order, preview)
                 time.sleep(0.002)      # keep timestamp stems unique
+            self._write_class_files()  # classes.txt + data.yaml for YOLO
         except Exception as exc:
             self._status(self._tr("export_fail").format(msg=exc), error=True)
             return
