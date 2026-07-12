@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "6.4"
+VERSION = "6.5"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -218,7 +218,8 @@ LANG = {
         "settings_newbox": "New boxes", "settings_storage": "Storage location",
         "settings_discord": "Discord",
         "start_sub": "Load manga pages, box every bubble and SFX, then export "
-                     "the training data. No AI here.",
+                     "the training data. No AI here. Tip: drag images or a "
+                     "folder anywhere onto the window.",
         "start_load": "Load images…", "start_folder": "Load folder…",
         "start_open": "Open project…", "start_rank": "Rank && load…",
         "start_heading": "Start", "start_clear": "Clear",
@@ -434,7 +435,8 @@ LANG = {
         "settings_newbox": "Neue Boxen", "settings_storage": "Speicherort",
         "settings_discord": "Discord",
         "start_sub": "Manga-Seiten laden, jede Blase und jeden SFX einrahmen, "
-                     "dann die Trainingsdaten exportieren. Keine KI hier.",
+                     "dann die Trainingsdaten exportieren. Keine KI hier. Tipp: "
+                     "Bilder oder einen Ordner einfach ins Fenster ziehen.",
         "start_load": "Bilder laden…", "start_folder": "Ordner laden…",
         "start_open": "Projekt öffnen…", "start_rank": "Rank && load…",
         "start_heading": "Start", "start_clear": "Leeren",
@@ -1823,6 +1825,7 @@ class TrainerWindow(QMainWindow):
         self._autosave_timer.timeout.connect(self._autosave)
         self._autosave_timer.start(60000)
 
+        self.setAcceptDrops(True)            # drop images/folders/projects to load
         self._refresh()
         self._start_discord()                # show "in BubblR Trainer" if enabled
 
@@ -2174,6 +2177,43 @@ class TrainerWindow(QMainWindow):
         else:
             details = "Labelling manga"
         self._discord.set_status(details, "%d/%d pages done" % (done, n))
+
+    # -- drag & drop: images / folders / a project .json onto the window -------
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+        images, project = [], None
+        for url in event.mimeData().urls():
+            p = url.toLocalFile()
+            if not p:
+                continue
+            if os.path.isdir(p):
+                try:
+                    for f in sorted(os.listdir(p)):
+                        if f.lower().endswith(exts):
+                            images.append(os.path.join(p, f))
+                except OSError:
+                    pass
+            elif p.lower().endswith(exts):
+                images.append(p)
+            elif p.lower().endswith(".json") and project is None:
+                project = p
+        if images:
+            self.add_image_paths(images)
+            self._remember_dir(os.path.dirname(images[0]))
+        elif project:
+            pages = self._load_pages_from(project)
+            if pages:
+                self._pages = pages
+                self._cur = -1
+                self._reset_history()
+                self._goto(0)
+                self._remember_dir(os.path.dirname(project))
+                self._status(self._tr("loaded_proj").format(n=len(pages)))
+        event.acceptProposedAction()
 
     def showEvent(self, event):
         super(TrainerWindow, self).showEvent(event)

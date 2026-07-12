@@ -35,6 +35,10 @@ When no pages are loaded, the canvas shows a **Krita-style start page**: big
 of **recent images** — click a thumbnail to jump straight back into it. It
 reappears whenever you close all pages.
 
+**Drag & drop:** you can also drag image files, a whole folder, or a project
+`.json` **anywhere onto the window** to load them — on the start page or while
+editing.
+
 ## How to label
 
 1. **Load images…** — pick one or many manga page images (PNG/JPG/…). They become
