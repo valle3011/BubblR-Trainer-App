@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.8"
+VERSION = "5.9"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -221,6 +221,7 @@ LANG = {
                      "the training data. No AI here.",
         "start_load": "Load images…", "start_folder": "Load folder…",
         "start_open": "Open project…", "start_rank": "Rank && load…",
+        "start_heading": "Start", "start_clear": "Clear",
         "start_recent": "Recent images",
         "recent_missing": "That image no longer exists.",
         "mi_discord": "Show on Discord",
@@ -436,6 +437,7 @@ LANG = {
                      "dann die Trainingsdaten exportieren. Keine KI hier.",
         "start_load": "Bilder laden…", "start_folder": "Ordner laden…",
         "start_open": "Projekt öffnen…", "start_rank": "Rank && load…",
+        "start_heading": "Start", "start_clear": "Leeren",
         "start_recent": "Zuletzt geöffnet",
         "recent_missing": "Dieses Bild existiert nicht mehr.",
         "mi_discord": "Auf Discord anzeigen",
@@ -1975,39 +1977,65 @@ class TrainerWindow(QMainWindow):
     def _build_start_page(self):
         page = QWidget()
         page.setObjectName("startPage")
-        outer = QVBoxLayout(page)
-        outer.setContentsMargins(40, 30, 40, 30)
-        outer.setSpacing(10)
+        outer = QHBoxLayout(page)
+        outer.setContentsMargins(34, 26, 34, 26)
+        outer.setSpacing(28)
 
+        # --- left "Start" column: logo, title, stacked action buttons ---
+        left = QVBoxLayout()
+        left.setSpacing(6)
+        self.start_logo = QLabel()
+        pm = app_icon().pixmap(72, 72)
+        if not pm.isNull():
+            self.start_logo.setPixmap(pm)
+        left.addWidget(self.start_logo)
         self.start_title = QLabel("BubblR Trainer")
-        self.start_title.setStyleSheet("font-size: 26px; font-weight: bold;")
-        outer.addWidget(self.start_title)
+        self.start_title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        left.addWidget(self.start_title)
         self.start_sub = QLabel(self._tr("start_sub"))
         self.start_sub.setStyleSheet("color: gray;")
         self.start_sub.setWordWrap(True)
-        outer.addWidget(self.start_sub)
-        outer.addSpacing(8)
+        left.addWidget(self.start_sub)
+        left.addSpacing(16)
+        self.start_heading = QLabel(self._tr("start_heading"))
+        self.start_heading.setStyleSheet("font-weight: bold; color: gray;")
+        left.addWidget(self.start_heading)
 
-        row = QHBoxLayout()
-        row.setSpacing(8)
         specs = [("start_load", self.on_load_images),
                  ("start_folder", self.on_load_folder),
                  ("start_open", self.on_load_project),
                  ("start_rank", self.on_rank_load)]
         self._start_btns = []
-        for key, fn in specs:
+        for key, fn in specs:                # stacked vertically, Krita-style
             b = QPushButton(self._tr(key))
-            b.setMinimumHeight(40)
+            b.setMinimumHeight(38)
+            b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _c=False, f=fn: f())
-            row.addWidget(b)
+            left.addWidget(b)
             self._start_btns.append((b, key))
-        row.addStretch(1)
-        outer.addLayout(row)
-        outer.addSpacing(10)
+        left.addStretch(1)
+        left_host = QWidget()
+        left_host.setLayout(left)
+        left_host.setFixedWidth(230)
+        outer.addWidget(left_host)
 
+        # --- right side: "Recent images" + Clear link, then the grid ---
+        right = QVBoxLayout()
+        right.setSpacing(8)
+        head = QHBoxLayout()
         self.start_recent_lbl = QLabel(self._tr("start_recent"))
         self.start_recent_lbl.setStyleSheet("font-weight: bold;")
-        outer.addWidget(self.start_recent_lbl)
+        head.addWidget(self.start_recent_lbl)
+        self.start_clear = QPushButton(self._tr("start_clear"))
+        self.start_clear.setFlat(True)
+        self.start_clear.setCursor(Qt.PointingHandCursor)
+        self.start_clear.setStyleSheet(
+            "QPushButton{border:none;color:#3daee9;} "
+            "QPushButton:hover{text-decoration:underline;}")
+        self.start_clear.clicked.connect(self._on_clear_recent)
+        head.addWidget(self.start_clear)
+        head.addStretch(1)
+        right.addLayout(head)
 
         self.recent_list = QListWidget()
         self.recent_list.setViewMode(QListWidget.IconMode)
@@ -2020,8 +2048,14 @@ class TrainerWindow(QMainWindow):
         self.recent_list.setWordWrap(True)
         self.recent_list.setFrameShape(QFrame.NoFrame)
         self.recent_list.itemClicked.connect(self._on_recent_clicked)
-        outer.addWidget(self.recent_list, 1)
+        right.addWidget(self.recent_list, 1)
+        outer.addLayout(right, 1)
         return page
+
+    def _on_clear_recent(self):
+        self._recent = []
+        self._save_settings()
+        self._rebuild_recent()
 
     def _on_recent_clicked(self, item):
         path = item.data(Qt.UserRole)
@@ -2911,7 +2945,9 @@ class TrainerWindow(QMainWindow):
         self.auto_order_btn.setToolTip(t("auto_order_tip"))
         if hasattr(self, "start_sub"):
             self.start_sub.setText(t("start_sub"))
+            self.start_heading.setText(t("start_heading"))
             self.start_recent_lbl.setText(t("start_recent"))
+            self.start_clear.setText(t("start_clear"))
             for b, key in self._start_btns:
                 b.setText(t(key))
         self._refresh()
