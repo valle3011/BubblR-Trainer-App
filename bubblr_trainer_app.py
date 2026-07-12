@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.5"
+VERSION = "5.6"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -47,7 +47,7 @@ RECOVERY_FILE = os.path.join(os.path.expanduser("~"),
 # Presence -> Art Assets), then paste its Application ID here so presence works
 # for everyone out of the box, with no per-user setup. Leave "" to disable the
 # built-in id (users can still enter their own in Settings -> Discord).
-DEFAULT_DISCORD_CLIENT_ID = ""
+DEFAULT_DISCORD_CLIENT_ID = "1525654247394246686"
 
 LANG = {
     "en": {
