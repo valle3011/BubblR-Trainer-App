@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "5.7"
+VERSION = "5.8"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1633,7 +1633,9 @@ class TrainerWindow(QMainWindow):
         lay.setSpacing(6)
         root.setLayout(lay)
 
-        top = QHBoxLayout()
+        self.top_bar = QWidget()             # hidden on the start page
+        top = QHBoxLayout(self.top_bar)
+        top.setContentsMargins(0, 0, 0, 0)
         self.lbl_sort = QLabel(self._tr("sort_by"))
         top.addWidget(self.lbl_sort)
         self.sort_combo = QComboBox()
@@ -1686,7 +1688,7 @@ class TrainerWindow(QMainWindow):
         self.zoom_in_btn.setFixedWidth(32)
         self.zoom_in_btn.clicked.connect(lambda: self.overlay.zoom_step(1.25))
         top.addWidget(self.zoom_in_btn)
-        lay.addLayout(top)
+        lay.addWidget(self.top_bar)
 
         self.overlay = BoxOverlay()
         self.overlay.boxAdded.connect(self._on_box_added)
@@ -1755,7 +1757,9 @@ class TrainerWindow(QMainWindow):
         self._build_docks()
 
         # compact view-option row: class filter, order path, auto order
-        opt_row = QHBoxLayout()
+        self.opt_bar = QWidget()             # hidden on the start page
+        opt_row = QHBoxLayout(self.opt_bar)
+        opt_row.setContentsMargins(0, 0, 0, 0)
         self.lbl_filter = QLabel(self._tr("show"))
         opt_row.addWidget(self.lbl_filter)
         self.filter_combo = QComboBox()
@@ -1775,7 +1779,7 @@ class TrainerWindow(QMainWindow):
         self.auto_chk.toggled.connect(self.set_auto_order)
         opt_row.addWidget(self.auto_chk)
         opt_row.addStretch(1)
-        lay.addLayout(opt_row)
+        lay.addWidget(self.opt_bar)
 
         # Undo/redo, delete, clear, class and export are all reachable from the
         # Edit / File menus (and the right-click menu); no button clutter here.
@@ -2057,14 +2061,21 @@ class TrainerWindow(QMainWindow):
             lw.addItem(it)
 
     def _sync_start_page(self):
-        """Show the start page when nothing is loaded, else the editor."""
+        """Show the full-screen start page (no docks / bars) when nothing is
+        loaded, else the editor with its panels."""
         if not hasattr(self, "canvas_stack"):
             return
-        if self._pages:
-            self.canvas_stack.setCurrentWidget(self.overlay)
-        else:
+        start = not self._pages
+        if start:
             self._rebuild_recent()
-            self.canvas_stack.setCurrentIndex(1)   # the start page
+        self.canvas_stack.setCurrentIndex(1 if start else 0)
+        # hide the editor chrome on the start page, like Krita's welcome screen
+        self.top_bar.setVisible(not start)
+        self.opt_bar.setVisible(not start)
+        for d in getattr(self, "_docks", []):
+            d.setVisible(not start)
+        if not start:                        # entering the editor: restore docks
+            self._restore_layout_once()
 
     def _unexported_count(self):
         """Pages that have boxes but have not been exported into the dataset."""
@@ -2118,23 +2129,29 @@ class TrainerWindow(QMainWindow):
 
     def showEvent(self, event):
         super(TrainerWindow, self).showEvent(event)
-        # restore the saved docker layout + sizes once the window is live, so
-        # panel widths/heights come back exactly as the user left them
-        if not getattr(self, "_state_restored", False):
-            self._state_restored = True
-            ds = getattr(self, "_pending_dockstate", None)
-            if ds:
-                try:
-                    self.restoreState(bytes.fromhex(ds))
-                    self._apply_thumbs_flow(
-                        self.dockWidgetArea(self.thumbs_dock))
-                    self._apply_dock_lock()
-                except Exception:            # noqa: BLE001
-                    pass
-            # restoreState is unreliable for dock SIZES, so force them, and once
-            # more after the layout settles (singleShot 0)
-            self._restore_dock_sizes()
-            QTimer.singleShot(0, self._restore_dock_sizes)
+        self._restore_layout_once()
+
+    def _restore_layout_once(self):
+        """Restore the saved docker layout + sizes exactly once, and only when
+        the window is visible AND the docks are shown (they're hidden on the
+        start page, where restoring would not stick)."""
+        if getattr(self, "_state_restored", False):
+            return
+        if not self.isVisible() or not self._pages:
+            return
+        self._state_restored = True
+        ds = getattr(self, "_pending_dockstate", None)
+        if ds:
+            try:
+                self.restoreState(bytes.fromhex(ds))
+                self._apply_thumbs_flow(self.dockWidgetArea(self.thumbs_dock))
+                self._apply_dock_lock()
+            except Exception:                # noqa: BLE001
+                pass
+        # restoreState is unreliable for dock SIZES, so force them, and once
+        # more after the layout settles (singleShot 0)
+        self._restore_dock_sizes()
+        QTimer.singleShot(0, self._restore_dock_sizes)
 
     def _restore_dock_sizes(self):
         """Force each dock back to the width/height it had last session."""
