@@ -26,7 +26,8 @@ from PyQt5.QtCore import QProcess, QTimer, QThread, pyqtSignal
 from bubblr_train_core import (
     read_yaml_summary, build_train_script, train_config, parse_progress,
     strip_ansi, build_predict_script, predict_config, diagnose_error,
-    check_dataset, parse_metrics, MODEL_URL, model_path)
+    check_dataset, parse_metrics, MODEL_URL, model_path, build_val_script,
+    val_config, read_run_metric)
 
 
 class ModelFetcher(QThread):
@@ -81,7 +82,7 @@ def _ver_tuple(v):
             out.append(0)
     return tuple(out)
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_model_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_model_trainer_shortcut")
@@ -182,6 +183,28 @@ class TrainerWindow(QMainWindow):
         dg.addWidget(self.getmodel_btn, 3, 3)
         dg.addWidget(self.custom_edit, 4, 1, 1, 2)
         dg.addWidget(self.custom_browse, 4, 3)
+        # optional baseline to compare the trained model against
+        self.baseline_edit = QLineEdit(cfg.get("baseline", ""))
+        self.baseline_edit.setPlaceholderText(
+            "optional: a .pt to compare against (e.g. the current model)")
+        base_browse = QPushButton("Browse…")
+        base_browse.clicked.connect(self._pick_baseline)
+        base_dl = QToolButton()
+        base_dl.setText("Use downloaded")
+        base_dl.setToolTip("Use the downloaded shared model as the baseline")
+        base_dl.clicked.connect(
+            lambda: self.baseline_edit.setText(model_path())
+            if os.path.isfile(model_path()) else
+            QMessageBox.information(self, "No model",
+                                   "Download the shared model first."))
+        base_cell = QWidget()
+        bcl = QHBoxLayout(base_cell)
+        bcl.setContentsMargins(0, 0, 0, 0)
+        bcl.addWidget(base_browse)
+        bcl.addWidget(base_dl)
+        dg.addWidget(QLabel("Baseline:"), 5, 0)
+        dg.addWidget(self.baseline_edit, 5, 1, 1, 2)
+        dg.addWidget(base_cell, 5, 3)
         root.addWidget(ds_box)
 
         # -- Hyper-parameters --
@@ -375,6 +398,13 @@ class TrainerWindow(QMainWindow):
         if path:
             self.custom_edit.setText(path)
 
+    def _pick_baseline(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select a baseline .pt model", os.path.expanduser("~"),
+            "PyTorch weights (*.pt)")
+        if path:
+            self.baseline_edit.setText(path)
+
     # -- environment check / install --
     def _python(self):
         return self.py_edit.text().strip() or sys.executable
@@ -553,6 +583,11 @@ class TrainerWindow(QMainWindow):
             clicked = box.clickedButton()      # "Show plots" opens results.png
             if clicked and box.buttonRole(clicked) == QMessageBox.ActionRole:
                 self._open_path(plot)
+            # optional: score a baseline on the same data and compare
+            base = self.baseline_edit.text().strip()
+            new_score = read_run_metric(self._last_run_dir or "")
+            if base and os.path.isfile(base) and new_score is not None:
+                self._compare_baseline(base, new_score)
         else:
             hint = diagnose_error(log)
             self.stat_lbl.setText("Failed (exit %d)." % code)
@@ -679,6 +714,62 @@ class TrainerWindow(QMainWindow):
             self._append("\n✅ Prediction done — see:\n%s\n" % save_dir)
             self._open_path(save_dir)
 
+    # -- baseline comparison (validate a baseline model, compare mAP) ----------
+    def _compare_baseline(self, baseline, new_score):
+        data = self.data_edit.text().strip()
+        if not (data and os.path.isfile(data)):
+            return
+        dev = self.device.currentText()
+        cfg = val_config(baseline, data, self.imgsz.value(),
+                         "" if dev == "auto" else dev)
+        d = tempfile.mkdtemp(prefix="bubblr_val_")
+        sp = os.path.join(d, "val.py")
+        cp = os.path.join(d, "cfg.json")
+        open(sp, "w", encoding="utf-8").write(build_val_script(cfg))
+        json.dump(cfg, open(cp, "w"))
+        self._new_score = new_score
+        self._val_out = None
+        self._append("\nScoring baseline %s on the same data…\n"
+                     % os.path.basename(baseline))
+        self.start_btn.setEnabled(False)
+        self.test_btn.setEnabled(False)
+        self._proc = QProcess(self)
+        self._proc.setProcessChannelMode(QProcess.MergedChannels)
+        self._proc.readyReadStandardOutput.connect(self._val_output)
+        self._proc.finished.connect(lambda code, _s: self._on_baseline_done(code))
+        self._proc.errorOccurred.connect(self._on_proc_error)
+        self._proc.start(self._python(), ["-u", sp, cp])
+
+    def _val_output(self):
+        data = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")
+        for line in data.splitlines():
+            clean = strip_ansi(line)
+            self._append(clean + "\n")
+            if clean.startswith("BUBBLR_VAL"):
+                try:
+                    self._val_out = float(clean.split()[1])
+                except (ValueError, IndexError):
+                    self._val_out = None
+
+    def _on_baseline_done(self, code):
+        self._proc = None
+        self.start_btn.setEnabled(True)
+        self.test_btn.setEnabled(True)
+        new = getattr(self, "_new_score", None)
+        base = getattr(self, "_val_out", None)
+        if code != 0 or base is None or new is None:
+            self._append("\nBaseline comparison unavailable.\n")
+            return
+        diff = new - base
+        verdict = "BETTER" if diff > 0 else ("worse" if diff < 0 else "equal")
+        msg = ("New model mAP50-95: %.4f\nBaseline mAP50-95: %.4f\n"
+               "Difference: %+.4f  →  the new model is %s."
+               % (new, base, diff, verdict))
+        self._append("\n%s\n" % msg)
+        self.stat_lbl.setText("New %.4f vs baseline %.4f (%+.4f) — %s"
+                              % (new, base, diff, verdict))
+        QMessageBox.information(self, "Baseline comparison", msg)
+
     def _open_path(self, path):
         if path and os.path.exists(path) and sys.platform.startswith("win"):
             try:
@@ -722,6 +813,7 @@ class TrainerWindow(QMainWindow):
                 "cache": self.cache_box.isChecked(),
                 "pretrained": self.pretrained_box.isChecked(),
                 "advanced_open": self.adv_box.isChecked(),
+                "baseline": self.baseline_edit.text().strip(),
                 "recent": self._recent[:8]}
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as fh:

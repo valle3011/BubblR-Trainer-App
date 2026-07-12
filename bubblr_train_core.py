@@ -54,6 +54,32 @@ def detect_config(model, source, imgsz=640, conf=0.25):
             "conf": float(conf)}
 
 
+def build_val_script(cfg):
+    """Validate a model on a dataset and print its mAP50-95 on a 'BUBBLR_VAL'
+    line. Used to score a baseline model for comparison."""
+    return (
+        "import json, sys, multiprocessing\n"
+        "from ultralytics import YOLO\n"
+        "\n"
+        "def _run():\n"
+        "    c = json.load(open(sys.argv[1], encoding='utf-8'))\n"
+        "    m = YOLO(c['model'])\n"
+        "    kw = dict(data=c['data'], imgsz=c['imgsz'])\n"
+        "    if c.get('device'):\n"
+        "        kw['device'] = c['device']\n"
+        "    r = m.val(**kw)\n"
+        "    print('BUBBLR_VAL', float(r.box.map))\n"
+        "\n"
+        "if __name__ == '__main__':\n"
+        "    multiprocessing.freeze_support()\n"
+        "    _run()\n")
+
+
+def val_config(model, data, imgsz=640, device=""):
+    return {"model": model, "data": data, "imgsz": int(imgsz),
+            "device": device or ""}
+
+
 def read_yaml_summary(path):
     """Small reader for a BubblR/YOLO data.yaml: returns (nc, [names])."""
     names, nc = [], None
