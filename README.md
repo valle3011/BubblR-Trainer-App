@@ -57,9 +57,14 @@ Trainer downloads it in the background from the latest GitHub release and stages
 it. It then installs itself **on the next launch** — during the splash it swaps
 in the new build and relaunches once, with **no dialog and no restart prompt**
 (Krita-style). If you'd rather not wait, an optional **“Install now”** button in
-the News column applies it straight away. Auto-download can be turned off under
-*Settings → Display*. The source (`.py`) version isn't self-replacing — update it
-with `git pull`.
+the News column applies it straight away. The source (`.py`) version isn't
+self-replacing — update it with `git pull`.
+
+Everything lives under *Settings → **Updates***: choose **Automatic** (download +
+install on next start) or **Manual** (an **Update** button appears with the new
+version shown next to it, and you decide when). You can also **install a specific
+version** from the dropdown — handy to roll back — and your **current version** is
+shown at the bottom of the tab.
 
 ## How to label
 

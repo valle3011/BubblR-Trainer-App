@@ -34,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.11"
+VERSION = "0.9.12"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -70,6 +70,8 @@ DEFAULT_DISCORD_CLIENT_ID = "1525654247394246686"
 NEWS_URL = ("https://raw.githubusercontent.com/valle3011/"
             "BubblR-Trainer-App/main/news.json")
 RELEASES_URL = "https://github.com/valle3011/BubblR-Trainer-App/releases"
+RELEASES_API = ("https://api.github.com/repos/valle3011/"
+                "BubblR-Trainer-App/releases")
 # The auto-updater downloads this asset from the latest GitHub release (a zip of
 # the onedir build). The "latest/download" URL always points at the newest one.
 UPDATE_ASSET = "BubblR-Trainer-win.zip"
@@ -288,6 +290,26 @@ LANG = {
         "settings_autoupd_hint": "When a newer version is found, download it in "
                                  "the background and offer a one-click install "
                                  "(Windows .exe only).",
+        "settings_updates": "Updates",
+        "update_mode_auto": "Automatic",
+        "update_mode_manual": "Manual",
+        "update_mode_hint": "Automatic: a newer version is downloaded in the "
+                            "background and installed on the next start. "
+                            "Manual: you get an Update button and decide when. "
+                            "(Windows .exe only.)",
+        "update_btn": "Update",
+        "update_contains": "New version: v{v}",
+        "update_uptodate": "You're on the latest version.",
+        "update_auto_note": "v{v} is downloaded — it installs on next start.",
+        "update_pick_label": "Install a specific version:",
+        "update_pick_btn": "Install",
+        "update_pick_hint": "Pick any released version, e.g. to roll back. In "
+                            "Automatic mode a newer version may re-install on the "
+                            "next start — switch to Manual to stay on an older one.",
+        "update_loading_versions": "Loading versions…",
+        "update_no_versions": "No versions found (offline?)",
+        "update_current": "Current version: {v}",
+        "update_already_on": "You're already on version {v}.",
         "update_downloading": "Downloading update…",
         "update_install": "Install & restart",
         "update_ready_next": "Update v{v} downloaded — installs on next start.",
@@ -559,6 +581,28 @@ LANG = {
         "settings_autoupd_hint": "Wenn eine neuere Version gefunden wird, wird "
                                  "sie im Hintergrund geladen und per Klick "
                                  "installiert (nur Windows-.exe).",
+        "settings_updates": "Updates",
+        "update_mode_auto": "Automatisch",
+        "update_mode_manual": "Manuell",
+        "update_mode_hint": "Automatisch: eine neuere Version wird im Hintergrund "
+                            "geladen und beim nächsten Start installiert. "
+                            "Manuell: du bekommst einen Update-Button und "
+                            "entscheidest selbst wann. (Nur Windows-.exe.)",
+        "update_btn": "Update",
+        "update_contains": "Neue Version: v{v}",
+        "update_uptodate": "Du hast die neueste Version.",
+        "update_auto_note": "v{v} ist geladen — wird beim nächsten Start "
+                            "installiert.",
+        "update_pick_label": "Bestimmte Version installieren:",
+        "update_pick_btn": "Installieren",
+        "update_pick_hint": "Wähle eine beliebige veröffentlichte Version, z. B. "
+                            "zum Zurückgehen. Im Automatik-Modus kann beim "
+                            "nächsten Start wieder eine neuere Version installiert "
+                            "werden — für eine ältere auf Manuell umstellen.",
+        "update_loading_versions": "Versionen werden geladen…",
+        "update_no_versions": "Keine Versionen gefunden (offline?)",
+        "update_current": "Aktuelle Version: {v}",
+        "update_already_on": "Du bist bereits auf Version {v}.",
         "update_downloading": "Update wird geladen…",
         "update_install": "Installieren & neu starten",
         "update_ready_next": "Update v{v} geladen — wird beim nächsten Start "
@@ -1823,6 +1867,42 @@ class UpdateDownloader(QThread):
             self.done.emit(None)
 
 
+class ReleasesFetcher(QThread):
+    """List published releases (that ship the Windows asset) from the GitHub API
+    in the background, so the user can pick any version. Emits a list of version
+    strings (newest first), or None on failure."""
+    loaded = pyqtSignal(object)
+
+    def run(self):
+        out = None
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                RELEASES_API, headers={"User-Agent": "BubblR-Trainer",
+                                       "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            vers = []
+            for rel in data:
+                if rel.get("draft") or rel.get("prerelease"):
+                    continue
+                if not any(a.get("name") == UPDATE_ASSET
+                           for a in rel.get("assets", [])):
+                    continue
+                tag = rel.get("tag_name", "")
+                vers.append(tag[1:] if tag.startswith("v") else tag)
+            out = vers
+        except Exception:                        # noqa: BLE001 (offline etc.)
+            out = None
+        self.loaded.emit(out)
+
+
+def _version_zip_url(v):
+    """Direct download URL for a specific release's Windows asset."""
+    return ("https://github.com/valle3011/BubblR-Trainer-App/releases/"
+            "download/v%s/%s" % (v, UPDATE_ASSET))
+
+
 def _stage_update(zip_path):
     """Unpack a downloaded update zip into the staging area and return the
     folder that actually holds our .exe (the onedir root). Raises on trouble."""
@@ -2695,6 +2775,70 @@ class TrainerWindow(QMainWindow):
             return
         QApplication.quit()
 
+    # -- explicit (manual) install of a chosen version ------------------------
+    def _manual_update(self, button=None):
+        """Download the newest release and install it right away."""
+        self._download_install_now(UPDATE_ZIP_URL,
+                                   getattr(self, "_latest_version", ""), button)
+
+    def _install_version(self, version, button=None):
+        """Download and install a specific chosen version (up- or downgrade)."""
+        if not version:
+            return
+        if version == VERSION:
+            QMessageBox.information(self, "BubblR Trainer",
+                                    self._tr("update_already_on").format(v=version))
+            return
+        self._download_install_now(_version_zip_url(version), version, button)
+
+    def _download_install_now(self, url, version, button=None):
+        """Download a specific build in the background, then swap it in and
+        relaunch immediately (used by the manual Update button and version
+        picker). No 'apply on next start' — the user asked for it now."""
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(self, "BubblR Trainer",
+                                    self._tr("update_src_only"))
+            return
+        if getattr(self, "_update_thread", None) is not None:
+            return
+        self._install_btn = button
+        if button is not None:
+            button.setEnabled(False)
+            button.setText(self._tr("update_downloading"))
+        os.makedirs(UPDATE_STAGE, exist_ok=True)
+        dest = os.path.join(UPDATE_STAGE, UPDATE_ASSET)
+        self._update_thread = UpdateDownloader(url, dest, self)
+        self._update_thread.done.connect(self._on_install_download_done)
+        self._update_thread.start()
+
+    def _on_install_download_done(self, path):
+        self._update_thread = None
+        btn = getattr(self, "_install_btn", None)
+
+        def _fail(msg):
+            if btn is not None:
+                btn.setEnabled(True)
+                btn.setText(self._tr("update_btn"))
+            QMessageBox.warning(self, "BubblR Trainer", msg)
+
+        if not path:
+            _fail(self._tr("update_failed"))
+            return
+        try:
+            src = _stage_update(path)
+            os.remove(path)
+        except Exception as e:                   # noqa: BLE001
+            _fail(self._tr("update_failed") + "\n\n%s" % e)
+            return
+        self._pending_update = None              # applying now, not next start
+        self._save_settings()
+        try:
+            _launch_swap_helper(src)
+        except Exception as e:                   # noqa: BLE001
+            _fail(self._tr("update_failed") + "\n\n%s" % e)
+            return
+        QApplication.quit()
+
     def _on_recent_clicked(self, item):
         path = item.data(Qt.UserRole)
         if path and os.path.exists(path):
@@ -3185,15 +3329,120 @@ class TrainerWindow(QMainWindow):
         news_hint.setWordWrap(True)
         news_hint.setStyleSheet("color: gray;")
         dv.addWidget(news_hint)
-        autoupd_box = QCheckBox()
-        autoupd_box.setChecked(self._auto_update)
-        autoupd_box.toggled.connect(lambda on: self.set_auto_update(on))
-        dv.addWidget(autoupd_box)
-        autoupd_hint = QLabel()
-        autoupd_hint.setWordWrap(True)
-        autoupd_hint.setStyleSheet("color: gray;")
-        dv.addWidget(autoupd_hint)
         dv.addStretch(1)
+
+        # -- Updates page: auto/manual, manual Update button, version picker --
+        upd = QWidget()
+        uv = QVBoxLayout(upd)
+        upd_title = QLabel()
+        upd_title.setStyleSheet("font-weight: bold;")
+        uv.addWidget(upd_title)
+        upd_grp = QButtonGroup(dlg)
+        rb_auto = QRadioButton()
+        rb_manual = QRadioButton()
+        upd_grp.addButton(rb_auto)
+        upd_grp.addButton(rb_manual)
+        rb_auto.setChecked(self._auto_update)
+        rb_manual.setChecked(not self._auto_update)
+        uv.addWidget(rb_auto)
+        uv.addWidget(rb_manual)
+        upd_mode_hint = QLabel()
+        upd_mode_hint.setWordWrap(True)
+        upd_mode_hint.setStyleSheet("color: gray;")
+        uv.addWidget(upd_mode_hint)
+        uv.addSpacing(12)
+        # available-update row: version on the left, "Update" button on the right
+        upd_row = QWidget()
+        rowl = QHBoxLayout(upd_row)
+        rowl.setContentsMargins(0, 0, 0, 0)
+        upd_avail_lbl = QLabel()
+        upd_btn = QPushButton()
+        upd_btn.setStyleSheet(
+            "background:#2f6f3f;color:#eaffea;font-weight:bold;"
+            "border:none;border-radius:5px;padding:7px 16px;")
+        rowl.addWidget(upd_avail_lbl)
+        rowl.addStretch(1)
+        rowl.addWidget(upd_btn)
+        uv.addWidget(upd_row)
+        upd_status = QLabel()
+        upd_status.setStyleSheet("color: gray;")
+        upd_status.setWordWrap(True)
+        uv.addWidget(upd_status)
+        uv.addSpacing(18)
+        # pick a specific version (up- or downgrade)
+        pick_lbl = QLabel()
+        uv.addWidget(pick_lbl)
+        pick_row = QWidget()
+        pl = QHBoxLayout(pick_row)
+        pl.setContentsMargins(0, 0, 0, 0)
+        ver_combo = QComboBox()
+        ver_combo.setMinimumWidth(150)
+        ver_combo.setEnabled(False)
+        pick_btn = QPushButton()
+        pick_btn.setEnabled(False)
+        pl.addWidget(ver_combo)
+        pl.addStretch(1)
+        pl.addWidget(pick_btn)
+        uv.addWidget(pick_row)
+        pick_hint = QLabel()
+        pick_hint.setWordWrap(True)
+        pick_hint.setStyleSheet("color: gray;")
+        uv.addWidget(pick_hint)
+        uv.addStretch(1)
+        # current version, centred at the bottom of the tab
+        cur_ver_lbl = QLabel()
+        cur_ver_lbl.setAlignment(Qt.AlignCenter)
+        cur_ver_lbl.setStyleSheet("color: gray;")
+        uv.addWidget(cur_ver_lbl)
+
+        def refresh_update_ui():
+            avail = getattr(self, "_latest_version", None)
+            has = bool(avail and _ver_tuple(avail) > _ver_tuple(VERSION))
+            manual = not self._auto_update
+            upd_row.setVisible(manual)
+            upd_btn.setEnabled(has)
+            upd_btn.setText(self._tr("update_btn"))
+            if has:
+                upd_avail_lbl.setText(self._tr("update_contains").format(v=avail))
+                upd_status.setText("" if manual
+                                   else self._tr("update_auto_note").format(v=avail))
+                upd_status.setVisible(not manual)
+            else:
+                upd_avail_lbl.setText(self._tr("update_uptodate"))
+                upd_status.setText(self._tr("update_uptodate"))
+                upd_status.setVisible(not manual)
+
+        def on_mode(_=None):
+            self._auto_update = rb_auto.isChecked()
+            self._save_settings()
+            refresh_update_ui()
+            if self._auto_update and getattr(sys, "frozen", False):
+                self._start_update_download()    # resume auto behaviour
+
+        rb_auto.toggled.connect(on_mode)
+        upd_btn.clicked.connect(lambda: self._manual_update(upd_btn))
+        pick_btn.clicked.connect(
+            lambda: self._install_version(ver_combo.currentText(), pick_btn))
+
+        def on_versions(vers):
+            try:                                 # dialog may already be closed
+                ver_combo.clear()
+                if not vers:
+                    ver_combo.addItem(self._tr("update_no_versions"))
+                    ver_combo.setEnabled(False)
+                    pick_btn.setEnabled(False)
+                    return
+                for v in vers:                   # plain version = currentText()
+                    ver_combo.addItem(v)
+                ver_combo.setEnabled(True)
+                pick_btn.setEnabled(True)
+            except RuntimeError:
+                pass
+
+        ver_combo.addItem(self._tr("update_loading_versions"))
+        self._rel_thread = ReleasesFetcher(self)
+        self._rel_thread.loaded.connect(on_versions)
+        self._rel_thread.start()
 
         # -- New boxes page: default class for a freshly drawn box --
         newp = QWidget()
@@ -3494,6 +3743,7 @@ class TrainerWindow(QMainWindow):
         sv.addStretch(1)
 
         stack.addWidget(disp)
+        stack.addWidget(upd)
         stack.addWidget(newp)
         stack.addWidget(clsp)
         stack.addWidget(toolsp)
@@ -3508,6 +3758,7 @@ class TrainerWindow(QMainWindow):
             nav.blockSignals(True)
             nav.clear()
             nav.addItem(tr("settings_display"))
+            nav.addItem(tr("settings_updates"))
             nav.addItem(tr("settings_newbox"))
             nav.addItem(tr("settings_classes"))
             nav.addItem(tr("settings_tools"))
@@ -3528,8 +3779,15 @@ class TrainerWindow(QMainWindow):
             center_hint.setText(tr("center_marker_tip"))
             news_box.setText(tr("settings_news"))
             news_hint.setText(tr("settings_news_hint"))
-            autoupd_box.setText(tr("settings_autoupd"))
-            autoupd_hint.setText(tr("settings_autoupd_hint"))
+            upd_title.setText(tr("settings_updates"))
+            rb_auto.setText(tr("update_mode_auto"))
+            rb_manual.setText(tr("update_mode_manual"))
+            upd_mode_hint.setText(tr("update_mode_hint"))
+            pick_lbl.setText(tr("update_pick_label"))
+            pick_btn.setText(tr("update_pick_btn"))
+            pick_hint.setText(tr("update_pick_hint"))
+            cur_ver_lbl.setText(tr("update_current").format(v=VERSION))
+            refresh_update_ui()
             newk_title.setText(tr("settings_newbox"))
             newk_hint.setText(tr("settings_newbox_hint"))
             wand_title.setText(tr("settings_tools"))

@@ -1,23 +1,23 @@
 {
-  "latest_version": "0.9.11",
+  "latest_version": "0.9.12",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
     {
       "date": "2026-07-12",
+      "title": "Updates tab: automatic or manual, pick any version",
+      "text": "New Settings → Updates tab. Choose Automatic (download + install on next start) or Manual (an Update button appears with the new version next to it — you decide when). You can also install a specific version from a dropdown to roll back, and your current version is shown at the bottom.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-12",
       "title": "Seamless updates on next start",
-      "text": "Updates now install themselves the next time you open BubblR Trainer — during the splash it swaps in the new build and relaunches once, with no dialog and no restart prompt (Krita-style). There's still an optional \"Install now\" button if you don't want to wait.",
+      "text": "Updates install themselves the next time you open BubblR Trainer — during the splash it swaps in the new build and relaunches once, with no dialog and no restart prompt (Krita-style).",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {
       "date": "2026-07-12",
       "title": "Background images & smarter export summary",
-      "text": "Turn on \"Export empty pages as background images\" (Settings → Storage) to export pages with no boxes as YOLO negatives — this reduces false detections. The export summary now counts negatives, warns about classes with no examples and flags badly imbalanced classes.",
-      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
-    },
-    {
-      "date": "2026-07-12",
-      "title": "Automatic updates",
-      "text": "BubblR Trainer checks for updates on start and downloads a new version in the background automatically. Turn it off under Settings → Display.",
+      "text": "Export empty pages as YOLO negatives (Settings → Storage) to reduce false detections. The export summary counts negatives and warns about empty or imbalanced classes.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {
