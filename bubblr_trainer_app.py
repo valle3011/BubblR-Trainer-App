@@ -30,7 +30,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "6.0"
+VERSION = "6.1"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
@@ -1849,11 +1849,12 @@ class TrainerWindow(QMainWindow):
                 "recent": self._recent[:40]}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
-            # Only capture the docker layout while the EDITOR is showing. On the
-            # start page the docks are hidden, and saving that state would bring
-            # them back hidden next time (with no way to show them). Keep the
-            # last good editor layout instead.
-            if self._pages:
+            # Only capture the docker layout while the EDITOR is showing AND the
+            # saved layout has already been restored. On the start page the docks
+            # are hidden (saving that hides them next time), and before the
+            # restore runs they're at default size (saving that would clobber the
+            # good layout). Keep the last good editor layout in those cases.
+            if self._pages and getattr(self, "_state_restored", False):
                 data["dockstate"] = bytes(self.saveState()).hex()
                 sizes = {}
                 for d in getattr(self, "_docks", []):
@@ -2116,10 +2117,13 @@ class TrainerWindow(QMainWindow):
         # hide the editor chrome on the start page, like Krita's welcome screen
         self.top_bar.setVisible(not start)
         self.opt_bar.setVisible(not start)
-        if not start:                        # entering the editor: restore docks
-            self._restore_layout_once()      # may restore a hidden state...
         for d in getattr(self, "_docks", []):
-            d.setVisible(not start)          # ...so force the right visibility
+            d.setVisible(not start)
+        if not start and not getattr(self, "_state_restored", False):
+            # defer to the next tick so the editor layout is active before we
+            # restoreState/resizeDocks (doing it synchronously here does not
+            # stick and the docks fall back to their default sizes)
+            QTimer.singleShot(0, self._restore_layout_once)
 
     def _unexported_count(self):
         """Pages that have boxes but have not been exported into the dataset."""
@@ -2194,10 +2198,11 @@ class TrainerWindow(QMainWindow):
                 pass
         for d in getattr(self, "_docks", []):    # never leave them hidden here
             d.setVisible(True)
-        # restoreState is unreliable for dock SIZES, so force them, and once
-        # more after the layout settles (singleShot 0)
+        # restoreState is unreliable for dock SIZES, so force them, and again a
+        # few times as the layout settles (the editor was just switched in)
         self._restore_dock_sizes()
-        QTimer.singleShot(0, self._restore_dock_sizes)
+        for delay in (0, 30, 120):
+            QTimer.singleShot(delay, self._restore_dock_sizes)
 
     def _restore_dock_sizes(self):
         """Force each dock back to the width/height it had last session."""
