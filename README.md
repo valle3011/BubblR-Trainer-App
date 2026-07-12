@@ -182,7 +182,18 @@ preview/<page>_<id>.png        the page with boxes + reading-order numbers drawn
                                check by eye
 ```
 
-Classes: **bubble = 0**, **sfx = 1**.
+Classes: **bubble = 0**, **sfx = 1** by default.
+
+## Not just manga — any object detector
+
+The export is plain **YOLO detection data** (image + `class cx cy w h`), so the
+classes are just *whatever you define*. Under **Settings → Classes** you can
+add / rename / recolour / reorder your own classes (each box's YOLO number is
+its position in the list). That turns BubblR Trainer into a general
+bounding-box annotator for **any** detector — faces, cars/plates, products,
+manufacturing defects, UI elements, etc. Press **1–9** (or **B** / **S**) to set
+the selected box's class, and *Reset to manga* restores the Bubble / SFX
+default. The reading-order export is a manga bonus you can simply ignore.
 
 ## Notes
 

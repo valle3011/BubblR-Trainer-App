@@ -24,15 +24,28 @@ from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
     QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
-    QStyle, QWidgetItem, QTabWidget, QToolBar, QLineEdit)
+    QStyle, QWidgetItem, QTabWidget, QToolBar, QLineEdit, QColorDialog)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "0.9"
+VERSION = "0.9.1"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
+# The default (manga) class set. Classes are user-configurable in Settings;
+# each box's "kind" is a class key, and the YOLO class number is the class's
+# position in this list. Keeping bubble=0 / sfx=1 as the default preserves
+# compatibility with existing datasets and the BubblR AI tools.
+DEFAULT_CLASSES = [
+    {"key": "bubble", "label": "Bubble", "color": [230, 60, 60]},
+    {"key": "sfx", "label": "SFX", "color": [70, 130, 230]},
+]
+# a spare palette for new custom classes
+CLASS_PALETTE = [
+    [60, 180, 90], [235, 160, 40], [160, 90, 210], [40, 190, 200],
+    [220, 90, 160], [120, 170, 60], [200, 70, 70], [90, 120, 230],
+]
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_trainer_shortcut_asked")
@@ -77,8 +90,18 @@ LANG = {
         "sort_name": "by name",
         "sort_unlabeled": "unlabelled first",
         "sort_unexported": "unexported first",
-        "show": "Show:", "show_all": "All", "show_bubble": "Bubbles only",
-        "show_sfx": "SFX only",
+        "show": "Show:", "show_all": "All", "show_only": "Only {name}",
+        "show_bubble": "Bubbles only", "show_sfx": "SFX only",
+        "mi_set_class": "Set class", "settings_classes": "Classes",
+        "class_add": "Add…", "class_rename": "Rename…", "class_color": "Colour…",
+        "class_remove": "Remove", "class_reset": "Reset to manga",
+        "class_name": "Class name:",
+        "settings_classes_hint": "Define the object classes for your dataset — "
+                                "each box's YOLO class number is its position "
+                                "here (0, 1, 2 …). The manga default is Bubble / "
+                                "SFX; add your own to train ANY object detector "
+                                "(faces, cars, defects …). Keys 1–9 (and B / S) "
+                                "set the class of the selection quickly.",
         "auto_order_live": "Auto order",
         "auto_order_live_tip": "Re-number the reading order automatically after "
                                "every add / move / delete.",
@@ -137,7 +160,7 @@ LANG = {
         "sc_done": "Shortcut created.",
         "sc_none": "No location selected.",
         "sh_title": "Keyboard shortcuts",
-        "sh_text": ("B / S — set the selected box to Bubble / SFX\n"
+        "sh_text": ("1–9 (or B / S) — set the selected box's class\n"
                     "Delete / Backspace — delete the selected box\n"
                     "Arrow keys — nudge the selected box (Shift = 10 px)\n"
                     "Alt + arrows — resize the selected box (Shift = 10 px)\n"
@@ -292,8 +315,19 @@ LANG = {
         "sort_name": "nach Name",
         "sort_unlabeled": "ungelabelte zuerst",
         "sort_unexported": "nicht exportierte zuerst",
-        "show": "Zeigen:", "show_all": "Alle", "show_bubble": "Nur Bubbles",
-        "show_sfx": "Nur SFX",
+        "show": "Zeigen:", "show_all": "Alle", "show_only": "Nur {name}",
+        "show_bubble": "Nur Bubbles", "show_sfx": "Nur SFX",
+        "mi_set_class": "Klasse setzen", "settings_classes": "Klassen",
+        "class_add": "Hinzufügen…", "class_rename": "Umbenennen…",
+        "class_color": "Farbe…", "class_remove": "Entfernen",
+        "class_reset": "Auf Manga zurücksetzen", "class_name": "Klassenname:",
+        "settings_classes_hint": "Definiere die Objektklassen für deinen "
+                                "Datensatz — die YOLO-Klassennummer jeder Box ist "
+                                "ihre Position hier (0, 1, 2 …). Standard (Manga) "
+                                "ist Bubble / SFX; füge eigene hinzu, um BELIEBIGE "
+                                "Objektdetektoren zu trainieren (Gesichter, Autos, "
+                                "Defekte …). Tasten 1–9 (und B / S) setzen die "
+                                "Klasse der Auswahl schnell.",
         "auto_order_live": "Auto-Reihenfolge",
         "auto_order_live_tip": "Die Lesereihenfolge nach jedem Hinzufügen / "
                                "Verschieben / Löschen automatisch neu vergeben.",
@@ -354,7 +388,7 @@ LANG = {
         "sc_done": "Verknüpfung angelegt.",
         "sc_none": "Kein Ort ausgewählt.",
         "sh_title": "Tastenkürzel",
-        "sh_text": ("B / S — ausgewählte Box auf Bubble / SFX setzen\n"
+        "sh_text": ("1–9 (oder B / S) — Klasse der ausgewählten Box setzen\n"
                     "Entf / Rücktaste — ausgewählte Box löschen\n"
                     "Pfeiltasten — ausgewählte Box verschieben (Umschalt = 10 px)\n"
                     "Alt + Pfeile — ausgewählte Box vergrößern/verkleinern (Umschalt = 10 px)\n"
@@ -488,10 +522,11 @@ LANG = {
 }
 
 
-def make_yolo_label(boxes, img_w, img_h):
+def make_yolo_label(boxes, img_w, img_h, class_index=None):
+    ci = class_index if class_index is not None else KIND_CLASS
     lines = []
     for b in boxes:
-        cls = KIND_CLASS.get(b.get("kind", "bubble"), 0)
+        cls = ci.get(b.get("kind", "bubble"), 0)
         cx = min(1.0, max(0.0, (b["x"] + b["w"] / 2.0) / float(img_w)))
         cy = min(1.0, max(0.0, (b["y"] + b["h"] / 2.0) / float(img_h)))
         w = min(1.0, max(0.0, b["w"] / float(img_w)))
@@ -500,7 +535,8 @@ def make_yolo_label(boxes, img_w, img_h):
     return "\n".join(lines) + "\n" if lines else ""
 
 
-def order_data(boxes, img_w, img_h):
+def order_data(boxes, img_w, img_h, class_index=None):
+    ci = class_index if class_index is not None else KIND_CLASS
     indexed = list(enumerate(boxes))
     indexed.sort(key=lambda p: (p[1].get("order") or 10 ** 9, p[0]))
     out = []
@@ -508,7 +544,7 @@ def order_data(boxes, img_w, img_h):
         kind = b.get("kind", "bubble")
         out.append({
             "order": seq, "set": bool(b.get("order")), "kind": kind,
-            "class": KIND_CLASS.get(kind, 0),
+            "class": ci.get(kind, 0),
             "x": int(b["x"]), "y": int(b["y"]),
             "w": int(b["w"]), "h": int(b["h"]),
             "cx": (b["x"] + b["w"] / 2.0) / float(img_w),
@@ -672,7 +708,10 @@ class BoxOverlay(QWidget):
         self._tool = "rect"       # rect | ellipse | lasso | wand
         self._show_center = True  # draw a marker at each box's centre
         self._show_order_path = False  # draw the 1->2->3 reading-order path
-        self._kind_filter = None       # None | "bubble" | "sfx" (show only that)
+        self._kind_filter = None       # None | class key (show only that class)
+        # class key -> (QColor, badge letter); set by the window from its classes
+        self._class_colors = dict(
+            bubble=(QColor(230, 60, 60), "B"), sfx=(QColor(70, 130, 230), "S"))
         self._wand_tol = 40       # magic-wand colour tolerance (0..255)
         self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -700,9 +739,22 @@ class BoxOverlay(QWidget):
         self.update()
 
     def set_kind_filter(self, kind):
-        """Show only boxes of this kind ("bubble"/"sfx"); None shows all."""
-        self._kind_filter = kind if kind in ("bubble", "sfx") else None
+        """Show only boxes of this class key; None shows all."""
+        self._kind_filter = kind if kind in self._class_colors else None
         self.update()
+
+    def set_class_colors(self, mapping):
+        """mapping: class key -> (QColor, badge letter)."""
+        self._class_colors = dict(mapping)
+        self.update()
+
+    def _kind_color(self, kind):
+        c = self._class_colors.get(kind)
+        return c[0] if c else QColor(150, 150, 150)
+
+    def _kind_letter(self, kind):
+        c = self._class_colors.get(kind)
+        return c[1] if c else "?"
 
     def _hidden(self, b):
         """Is this box hidden by the active class filter?"""
@@ -813,8 +865,8 @@ class BoxOverlay(QWidget):
                 continue
             r = QRectF(t.x() + b["x"] * scale, t.y() + b["y"] * scale,
                        b["w"] * scale, b["h"] * scale)
-            color = QColor(*KIND_COLOR.get(b.get("kind", "bubble"),
-                                           KIND_COLOR["bubble"]))
+            kind = b.get("kind", "bubble")
+            color = self._kind_color(kind)
             sel = (k == self._current) or (k in self._selected)
             p.setPen(QPen(color, 3 if sel else 2))
             p.setBrush(Qt.NoBrush)
@@ -823,7 +875,7 @@ class BoxOverlay(QWidget):
             if self._show_center:
                 self._draw_center(p, r.center(), color, big=sel)
             order = b.get("order", 0)
-            label = str(order) if order else ("B" if b.get("kind") != "sfx" else "S")
+            label = str(order) if order else self._kind_letter(kind)
             badge = QRectF(r.x(), r.y(), max(18, 8 + 8 * len(label)), 16)
             p.fillRect(badge, color)
             p.setPen(QPen(QColor(255, 255, 255)))
@@ -1622,8 +1674,10 @@ class TrainerWindow(QMainWindow):
         self._class_filter = None                 # None | "bubble" | "sfx"
         self._pages = []          # [{path, name, img: QImage, boxes: []}]
         self._cur = -1
+        self._classes = self._sanitize_classes(cfg.get("classes"))
         _nk = cfg.get("new_kind", "bubble")
-        self._new_kind = _nk if _nk in ("bubble", "sfx") else "bubble"
+        keys = self._class_keys()
+        self._new_kind = _nk if _nk in keys else keys[0]
         self._order_mode = False
         self._order_counter = 1
         self._undo = []           # snapshots of (page index, boxes, selection)
@@ -1767,8 +1821,7 @@ class TrainerWindow(QMainWindow):
         self.lbl_filter = QLabel(self._tr("show"))
         opt_row.addWidget(self.lbl_filter)
         self.filter_combo = QComboBox()
-        for _fk in ("all", "bubble", "sfx"):
-            self.filter_combo.addItem(self._tr("show_" + _fk), _fk)
+        self._rebuild_filter_combo()         # All + one entry per class
         self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         opt_row.addWidget(self.filter_combo)
         opt_row.addSpacing(12)
@@ -1818,6 +1871,15 @@ class TrainerWindow(QMainWindow):
         # menu bar (also carries the keyboard shortcuts); Esc stays a shortcut
         self._build_menu()
         QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self._deselect)
+        # class shortcuts: 1..9 pick the Nth class; B/S map to the first two
+        # (so the manga bubble/sfx muscle memory still works)
+        for _n in range(9):
+            QShortcut(QKeySequence(str(_n + 1)), self,
+                      activated=lambda i=_n: self._kbd_set_class_index(i))
+        QShortcut(QKeySequence("B"), self,
+                  activated=lambda: self._kbd_set_class_index(0))
+        QShortcut(QKeySequence("S"), self,
+                  activated=lambda: self._kbd_set_class_index(1))
         self._update_undo_buttons()
 
         # auto-save the session every minute for crash recovery
@@ -1826,6 +1888,7 @@ class TrainerWindow(QMainWindow):
         self._autosave_timer.start(60000)
 
         self.setAcceptDrops(True)            # drop images/folders/projects to load
+        self._apply_classes()                # push classes to overlay + filter
         self._refresh()
         self._start_discord()                # show "in BubblR Trainer" if enabled
 
@@ -1849,7 +1912,7 @@ class TrainerWindow(QMainWindow):
                 "center_marker": self._center, "last_dir": self._last_dir,
                 "discord_enabled": self._discord_enabled,
                 "discord_client_id": self._discord_id,
-                "recent": self._recent[:40]}
+                "recent": self._recent[:40], "classes": self._classes}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             # Only capture the docker layout while the EDITOR is showing AND the
@@ -1962,6 +2025,93 @@ class TrainerWindow(QMainWindow):
         self._locked = bool(locked)
         self._apply_dock_lock()
         self._save_settings()
+
+    # -- classes (configurable) ----------------------------------------------
+    @staticmethod
+    def _sanitize_classes(raw):
+        """Return a valid ordered class list (key/label/color), else the manga
+        default. Keys are made unique and non-empty."""
+        out, seen = [], set()
+        for c in (raw or []):
+            if not isinstance(c, dict):
+                continue
+            key = str(c.get("key") or c.get("label") or "").strip()
+            if not key or key in seen:
+                continue
+            col = c.get("color")
+            if not (isinstance(col, (list, tuple)) and len(col) == 3):
+                col = CLASS_PALETTE[len(out) % len(CLASS_PALETTE)]
+            out.append({"key": key, "label": str(c.get("label") or key),
+                        "color": [int(col[0]), int(col[1]), int(col[2])]})
+            seen.add(key)
+        if not out:
+            out = [dict(c) for c in DEFAULT_CLASSES]
+        return out
+
+    def _class_keys(self):
+        return [c["key"] for c in self._classes]
+
+    def _class_index_map(self):
+        return {c["key"]: i for i, c in enumerate(self._classes)}
+
+    def _class_label(self, key):
+        for c in self._classes:
+            if c["key"] == key:
+                return c["label"]
+        return key
+
+    def _class_color(self, key):
+        for c in self._classes:
+            if c["key"] == key:
+                return tuple(c["color"])
+        return (150, 150, 150)
+
+    def _apply_classes(self):
+        """Push the current class set to the overlay, filter combo and new-box
+        default, then repaint."""
+        colors = {c["key"]: (QColor(*c["color"]),
+                             (c["label"][:1] or "?").upper())
+                  for c in self._classes}
+        self.overlay.set_class_colors(colors)
+        if self._new_kind not in self._class_keys():
+            self._new_kind = self._class_keys()[0]
+        # drop a filter that no longer exists
+        if self._class_filter and self._class_filter not in self._class_keys():
+            self._class_filter = None
+            self.overlay.set_kind_filter(None)
+        self._rebuild_filter_combo()
+        self._rebuild_class_menu()
+        self._refresh()
+
+    def _rebuild_class_menu(self):
+        m = getattr(self, "_class_menu", None)
+        if m is None:
+            return
+        m.clear()
+        for i, c in enumerate(self._classes):
+            label = c["label"] + ("  (%d)" % (i + 1) if i < 9 else "")
+            m.addAction(label,
+                        lambda _c=False, k=c["key"]: self._kbd_set_kind(k))
+
+    def _kbd_set_class_index(self, n):
+        keys = self._class_keys()
+        if 0 <= n < len(keys):
+            self._kbd_set_kind(keys[n])
+
+    def _rebuild_filter_combo(self):
+        if not hasattr(self, "filter_combo"):
+            return
+        cb = self.filter_combo
+        cb.blockSignals(True)
+        cb.clear()
+        cb.addItem(self._tr("show_all"), "all")
+        for c in self._classes:
+            cb.addItem(self._tr("show_only").format(name=c["label"]), c["key"])
+        # restore current filter selection
+        want = self._class_filter or "all"
+        idx = max(0, cb.findData(want))
+        cb.setCurrentIndex(idx)
+        cb.blockSignals(False)
 
     # -- class filter + live auto-order ---------------------------------------
     def _on_filter_changed(self):
@@ -2390,8 +2540,11 @@ class TrainerWindow(QMainWindow):
         menu.addAction(t("mi_dup"), lambda: self.on_duplicate_box())
         menu.addAction(t("fit_box"), lambda: self.on_fit_box())
         menu.addSeparator()
-        menu.addAction(t("mi_bubble"), lambda: self._kbd_set_kind("bubble"))
-        menu.addAction(t("mi_sfx"), lambda: self._kbd_set_kind("sfx"))
+        sub = menu.addMenu(t("mi_set_class"))
+        for i, c in enumerate(self._classes):
+            label = c["label"] + ("  (%d)" % (i + 1) if i < 9 else "")
+            sub.addAction(label,
+                          lambda _c=False, k=c["key"]: self._kbd_set_kind(k))
         menu.exec_(gpos)
 
     def _show_shortcuts(self):
@@ -2431,8 +2584,7 @@ class TrainerWindow(QMainWindow):
                 ("fit_box", self.on_fit_box, "F"),
                 ("mi_select_all", self.on_select_all, "Ctrl+A"),
                 None,
-                ("mi_bubble", lambda: self._kbd_set_kind("bubble"), "B"),
-                ("mi_sfx", lambda: self._kbd_set_kind("sfx"), "S"),
+                ("mi_set_class", "__setclass__", None),
                 None,
                 ("mi_clear_order", self.on_clear_order, None),
                 ("clear", self.on_clear, None),
@@ -2481,6 +2633,11 @@ class TrainerWindow(QMainWindow):
                     self._menu_titles.append((sub, akey))
                     for d in getattr(self, "_docks", []):
                         sub.addAction(d.toggleViewAction())
+                    continue
+                if fn == "__setclass__":          # submenu: set class of selection
+                    self._class_menu = menu.addMenu(self._tr(akey))
+                    self._menu_titles.append((self._class_menu, akey))
+                    self._rebuild_class_menu()
                     continue
                 if fn == "__lock__":              # checkable "Lock panels" toggle
                     act = menu.addAction(self._tr(akey))
@@ -2553,28 +2710,133 @@ class TrainerWindow(QMainWindow):
         newk_title = QLabel()
         newk_title.setStyleSheet("font-weight: bold;")
         nv.addWidget(newk_title)
-        grp_nk = QButtonGroup(dlg)
-        rb_bub = QRadioButton()
-        rb_sfx = QRadioButton()
-        grp_nk.addButton(rb_bub)
-        grp_nk.addButton(rb_sfx)
-        rb_bub.setChecked(self._new_kind != "sfx")
-        rb_sfx.setChecked(self._new_kind == "sfx")
+        newk_combo = QComboBox()
+        for c in self._classes:
+            newk_combo.addItem(c["label"], c["key"])
+        i = max(0, newk_combo.findData(self._new_kind))
+        newk_combo.setCurrentIndex(i)
 
-        def on_newk(kind, on):
-            if on and kind != self._new_kind:
-                self._new_kind = kind
+        def on_newk(_i):
+            k = newk_combo.currentData()
+            if k and k != self._new_kind:
+                self._new_kind = k
                 self._save_settings()
 
-        rb_bub.toggled.connect(lambda on: on_newk("bubble", on))
-        rb_sfx.toggled.connect(lambda on: on_newk("sfx", on))
-        nv.addWidget(rb_bub)
-        nv.addWidget(rb_sfx)
+        newk_combo.currentIndexChanged.connect(on_newk)
+        nv.addWidget(newk_combo)
         newk_hint = QLabel()
         newk_hint.setWordWrap(True)
         newk_hint.setStyleSheet("color: gray;")
         nv.addWidget(newk_hint)
         nv.addStretch(1)
+
+        # -- Classes page: configurable detection classes --
+        clsp = QWidget()
+        clv = QVBoxLayout(clsp)
+        cls_title = QLabel()
+        cls_title.setStyleSheet("font-weight: bold;")
+        clv.addWidget(cls_title)
+        cls_list = QListWidget()
+        clv.addWidget(cls_list, 1)
+
+        def cls_refill():
+            cls_list.clear()
+            for c in self._classes:
+                it = QListWidgetItem(" " + c["label"])
+                pm = QPixmap(16, 16)
+                pm.fill(QColor(*c["color"]))
+                it.setIcon(QIcon(pm))
+                cls_list.addItem(it)
+
+        cls_refill()
+        crow = QHBoxLayout()
+        b_add, b_ren, b_col = QPushButton(), QPushButton(), QPushButton()
+        b_del, b_up, b_dn = QPushButton(), QPushButton("▲"), QPushButton("▼")
+        b_reset = QPushButton()
+        for b in (b_add, b_ren, b_col, b_del, b_up, b_dn):
+            crow.addWidget(b)
+        crow.addStretch(1)
+        crow.addWidget(b_reset)
+        clv.addLayout(crow)
+        cls_hint = QLabel()
+        cls_hint.setWordWrap(True)
+        cls_hint.setStyleSheet("color: gray;")
+        clv.addWidget(cls_hint)
+
+        def cls_sel():
+            r = cls_list.currentRow()
+            return r if 0 <= r < len(self._classes) else -1
+
+        def cls_commit(select=None):
+            self._classes = self._sanitize_classes(self._classes)
+            self._apply_classes()
+            self._save_settings()
+            cls_refill()
+            if select is not None:
+                cls_list.setCurrentRow(max(0, min(select, len(self._classes) - 1)))
+            newk_combo.blockSignals(True)
+            newk_combo.clear()
+            for c in self._classes:
+                newk_combo.addItem(c["label"], c["key"])
+            newk_combo.setCurrentIndex(max(0, newk_combo.findData(self._new_kind)))
+            newk_combo.blockSignals(False)
+
+        def cls_add():
+            name, ok = QInputDialog.getText(dlg, self._tr("settings_classes"),
+                                            self._tr("class_name"))
+            name = name.strip()
+            if ok and name and name not in self._class_keys():
+                col = CLASS_PALETTE[len(self._classes) % len(CLASS_PALETTE)]
+                self._classes.append({"key": name, "label": name,
+                                      "color": list(col)})
+                cls_commit(select=len(self._classes) - 1)
+
+        def cls_rename():
+            r = cls_sel()
+            if r < 0:
+                return
+            name, ok = QInputDialog.getText(dlg, self._tr("settings_classes"),
+                                            self._tr("class_name"),
+                                            text=self._classes[r]["label"])
+            if ok and name.strip():
+                self._classes[r]["label"] = name.strip()
+                cls_commit(select=r)
+
+        def cls_color():
+            r = cls_sel()
+            if r < 0:
+                return
+            c = QColorDialog.getColor(QColor(*self._classes[r]["color"]), dlg)
+            if c.isValid():
+                self._classes[r]["color"] = [c.red(), c.green(), c.blue()]
+                cls_commit(select=r)
+
+        def cls_remove():
+            r = cls_sel()
+            if r < 0 or len(self._classes) <= 1:
+                return
+            del self._classes[r]
+            cls_commit(select=r)
+
+        def cls_move(d):
+            r = cls_sel()
+            j = r + d
+            if r < 0 or not (0 <= j < len(self._classes)):
+                return
+            self._classes[r], self._classes[j] = self._classes[j], self._classes[r]
+            cls_commit(select=j)
+
+        def cls_reset():
+            self._classes = [dict(c) for c in DEFAULT_CLASSES]
+            cls_commit(select=0)
+
+        b_add.clicked.connect(cls_add)
+        b_ren.clicked.connect(cls_rename)
+        b_col.clicked.connect(cls_color)
+        b_del.clicked.connect(cls_remove)
+        b_up.clicked.connect(lambda: cls_move(-1))
+        b_dn.clicked.connect(lambda: cls_move(1))
+        b_reset.clicked.connect(cls_reset)
 
         # -- Tools page: magic-wand tolerance --
         toolsp = QWidget()
@@ -2671,6 +2933,7 @@ class TrainerWindow(QMainWindow):
 
         stack.addWidget(disp)
         stack.addWidget(newp)
+        stack.addWidget(clsp)
         stack.addWidget(toolsp)
         stack.addWidget(disc)
         stack.addWidget(store)
@@ -2684,17 +2947,23 @@ class TrainerWindow(QMainWindow):
             nav.clear()
             nav.addItem(tr("settings_display"))
             nav.addItem(tr("settings_newbox"))
+            nav.addItem(tr("settings_classes"))
             nav.addItem(tr("settings_tools"))
             nav.addItem(tr("settings_discord"))
             nav.addItem(tr("settings_storage"))
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
+            cls_title.setText(tr("settings_classes"))
+            b_add.setText(tr("class_add"))
+            b_ren.setText(tr("class_rename"))
+            b_col.setText(tr("class_color"))
+            b_del.setText(tr("class_remove"))
+            b_reset.setText(tr("class_reset"))
+            cls_hint.setText(tr("settings_classes_hint"))
             lang_title.setText(tr("mi_language"))
             center_box.setText(tr("center_marker"))
             center_hint.setText(tr("center_marker_tip"))
             newk_title.setText(tr("settings_newbox"))
-            rb_bub.setText(tr("bubble"))
-            rb_sfx.setText(tr("sfx"))
             newk_hint.setText(tr("settings_newbox_hint"))
             wand_title.setText(tr("settings_tools"))
             wand_lbl.setText(tr("wand_tol"))
@@ -2740,13 +3009,12 @@ class TrainerWindow(QMainWindow):
         for i, b in enumerate(pg["boxes"] if pg else []):
             order = b.get("order", 0)
             num = str(order) if order else str(i + 1)
-            kind = "SFX" if b.get("kind") == "sfx" else "Bubble"
-            it = QListWidgetItem("%s   %s" % (num, kind))
-            if flt and b.get("kind", "bubble") != flt:
+            kind = b.get("kind", "bubble")
+            it = QListWidgetItem("%s   %s" % (num, self._class_label(kind)))
+            if flt and kind != flt:
                 it.setForeground(QColor(120, 120, 120))   # filtered out (dim)
             else:
-                it.setForeground(QColor(70, 130, 230) if b.get("kind") == "sfx"
-                                 else QColor(230, 60, 60))
+                it.setForeground(QColor(*self._class_color(kind)))
             it.setData(Qt.UserRole, i)        # original box index, for reordering
             lw.addItem(it)
         cur = getattr(self, "_current", -1)
@@ -3569,15 +3837,15 @@ class TrainerWindow(QMainWindow):
         lw = max(2, img.width() // 400)
         boxes = pg["boxes"]
         for b in boxes:
-            color = QColor(*KIND_COLOR.get(b.get("kind", "bubble"),
-                                           KIND_COLOR["bubble"]))
+            kind = b.get("kind", "bubble")
+            color = QColor(*self._class_color(kind))
             p.setPen(QPen(color, lw))
             p.setBrush(Qt.NoBrush)
             p.drawRect(QRectF(b["x"], b["y"], b["w"], b["h"]))
-            # reading-order number (or B/S class) badge, like the on-screen view
+            # reading-order number (or class-initial) badge, like the on-screen view
             order = b.get("order", 0)
-            label = str(order) if order else ("B" if b.get("kind") != "sfx"
-                                              else "S")
+            label = str(order) if order else (self._class_label(kind)[:1]
+                                              or "?").upper()
             bw = max(fs + 6, 6 + int(fs * 0.7) * len(label))
             badge = QRectF(b["x"], b["y"], bw, fs + 6)
             p.fillRect(badge, color)
@@ -3616,9 +3884,10 @@ class TrainerWindow(QMainWindow):
         if not pg["img"].save(os.path.join(images, stem + ".png"), "PNG"):
             raise IOError("could not write page image")
         with open(os.path.join(labels, stem + ".txt"), "w", encoding="utf-8") as fh:
-            fh.write(make_yolo_label(pg["boxes"], w, h))
+            fh.write(make_yolo_label(pg["boxes"], w, h, self._class_index_map()))
         with open(os.path.join(order, stem + ".json"), "w", encoding="utf-8") as fh:
-            json.dump(order_data(pg["boxes"], w, h), fh, indent=2)
+            json.dump(order_data(pg["boxes"], w, h, self._class_index_map()),
+                      fh, indent=2)
         try:
             self._render_preview(pg).save(os.path.join(preview, stem + ".png"), "PNG")
         except Exception:
