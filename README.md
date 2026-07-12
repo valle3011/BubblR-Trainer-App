@@ -201,7 +201,9 @@ its position in the list). That turns BubblR Trainer into a general
 bounding-box annotator for **any** detector — faces, cars/plates, products,
 manufacturing defects, UI elements, etc. Press **1–9** (or **B** / **S**) to set
 the selected box's class, and *Reset to manga* restores the Bubble / SFX
-default. The reading-order export is a manga bonus you can simply ignore.
+default. **Import…** reads the class names from an existing `classes.txt` or
+YOLO `data.yaml` so you can match another dataset in one click. The reading-order
+export is a manga bonus you can simply ignore.
 
 ## Notes
 

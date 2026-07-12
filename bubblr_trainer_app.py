@@ -31,7 +31,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "0.9.3"
+VERSION = "0.9.4"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -96,7 +96,9 @@ LANG = {
         "mi_set_class": "Set class", "settings_classes": "Classes",
         "class_add": "Add…", "class_rename": "Rename…", "class_color": "Colour…",
         "class_remove": "Remove", "class_reset": "Reset to manga",
-        "class_name": "Class name:",
+        "class_import": "Import…", "class_name": "Class name:",
+        "class_import_fail": "No class names found in that file.",
+        "class_imported": "Imported {n} class(es).",
         "settings_classes_hint": "Define the object classes for your dataset — "
                                 "each box's YOLO class number is its position "
                                 "here (0, 1, 2 …). The manga default is Bubble / "
@@ -326,6 +328,9 @@ LANG = {
         "class_add": "Hinzufügen…", "class_rename": "Umbenennen…",
         "class_color": "Farbe…", "class_remove": "Entfernen",
         "class_reset": "Auf Manga zurücksetzen", "class_name": "Klassenname:",
+        "class_import": "Importieren…",
+        "class_import_fail": "Keine Klassennamen in der Datei gefunden.",
+        "class_imported": "{n} Klasse(n) importiert.",
         "settings_classes_hint": "Definiere die Objektklassen für deinen "
                                 "Datensatz — die YOLO-Klassennummer jeder Box ist "
                                 "ihre Position hier (0, 1, 2 …). Standard (Manga) "
@@ -2059,6 +2064,52 @@ class TrainerWindow(QMainWindow):
             out = [dict(c) for c in DEFAULT_CLASSES]
         return out
 
+    @staticmethod
+    def _parse_class_names(path):
+        """Read class names from a classes.txt (one per line) or a YOLO
+        data.yaml ('names:' as a list or an index->name map). Returns [] on
+        failure."""
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            return []
+        if os.path.splitext(path)[1].lower() not in (".yaml", ".yml"):
+            return [ln.strip() for ln in text.splitlines() if ln.strip()]
+        lines = text.splitlines()
+        for i, ln in enumerate(lines):
+            if not ln.strip().startswith("names:"):
+                continue
+            rest = ln.strip()[len("names:"):].strip()
+            if rest.startswith("["):                 # inline list
+                inner = rest.strip("[]")
+                return [p.strip().strip("'\"") for p in inner.split(",")
+                        if p.strip()]
+            entries, seq = [], 0                      # block list or map
+            for ln2 in lines[i + 1:]:
+                if not ln2.strip():
+                    continue
+                t = ln2.strip()
+                if t.startswith("- "):                # sequence item (any indent)
+                    entries.append((seq, t[2:].strip().strip("'\"")))
+                    seq += 1
+                    continue
+                if not ln2[:1].isspace():             # next top-level key -> stop
+                    break
+                if ":" in t:
+                    k, v = t.split(":", 1)
+                    v = v.strip().strip("'\"")
+                    try:
+                        order = int(k.strip())
+                    except ValueError:
+                        order = seq
+                    if v:
+                        entries.append((order, v))
+                seq += 1
+            entries.sort(key=lambda e: e[0])
+            return [v for _o, v in entries]
+        return []
+
     def _class_keys(self):
         return [c["key"] for c in self._classes]
 
@@ -2763,10 +2814,11 @@ class TrainerWindow(QMainWindow):
         crow = QHBoxLayout()
         b_add, b_ren, b_col = QPushButton(), QPushButton(), QPushButton()
         b_del, b_up, b_dn = QPushButton(), QPushButton("▲"), QPushButton("▼")
-        b_reset = QPushButton()
+        b_import, b_reset = QPushButton(), QPushButton()
         for b in (b_add, b_ren, b_col, b_del, b_up, b_dn):
             crow.addWidget(b)
         crow.addStretch(1)
+        crow.addWidget(b_import)
         crow.addWidget(b_reset)
         clv.addLayout(crow)
         cls_hint = QLabel()
@@ -2841,12 +2893,36 @@ class TrainerWindow(QMainWindow):
             self._classes = [dict(c) for c in DEFAULT_CLASSES]
             cls_commit(select=0)
 
+        def cls_import():
+            path, _f = QFileDialog.getOpenFileName(
+                dlg, self._tr("class_import"), self._start_dir(),
+                "classes.txt / data.yaml (*.txt *.yaml *.yml)")
+            if not path:
+                return
+            names, seen = [], set()
+            for n in self._parse_class_names(path):     # dedup, keep order
+                n = n.strip()
+                if n and n not in seen:
+                    names.append(n)
+                    seen.add(n)
+            if not names:
+                self._status(self._tr("class_import_fail"), error=True)
+                return
+            old = {c["key"]: c["color"] for c in self._classes}
+            self._classes = [
+                {"key": n, "label": n,
+                 "color": old.get(n) or CLASS_PALETTE[i % len(CLASS_PALETTE)]}
+                for i, n in enumerate(names)]
+            cls_commit(select=0)
+            self._status(self._tr("class_imported").format(n=len(names)))
+
         b_add.clicked.connect(cls_add)
         b_ren.clicked.connect(cls_rename)
         b_col.clicked.connect(cls_color)
         b_del.clicked.connect(cls_remove)
         b_up.clicked.connect(lambda: cls_move(-1))
         b_dn.clicked.connect(lambda: cls_move(1))
+        b_import.clicked.connect(cls_import)
         b_reset.clicked.connect(cls_reset)
 
         # -- Tools page: magic-wand tolerance --
@@ -2991,6 +3067,7 @@ class TrainerWindow(QMainWindow):
             b_ren.setText(tr("class_rename"))
             b_col.setText(tr("class_color"))
             b_del.setText(tr("class_remove"))
+            b_import.setText(tr("class_import"))
             b_reset.setText(tr("class_reset"))
             cls_hint.setText(tr("settings_classes_hint"))
             lang_title.setText(tr("mi_language"))
