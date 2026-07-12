@@ -286,8 +286,9 @@ can pull it directly:
   the page so you only fix mistakes instead of drawing everything. (These live in
   the experimental Tools menu.)
 
-Publish a new model by creating a release in BubblR-Model whose asset is named
-`bubblr-model.pt` (see that repo's README).
+Models in that repo are published only by the maintainer, using
+`bubblr_publish.py` — it uploads a trained model with the next version number
+**only if it beats the currently published one** (compares mAP50-95).
 
 ## Not just manga — any object detector
 

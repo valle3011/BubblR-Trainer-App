@@ -185,6 +185,26 @@ def diagnose_error(text):
     return None
 
 
+def read_run_metric(run_dir, key="mAP50-95"):
+    """Read a training run's final metric from results.csv (default mAP50-95).
+    Returns a float, or None if unavailable."""
+    csv = os.path.join(run_dir, "results.csv")
+    if not os.path.isfile(csv):
+        return None
+    try:
+        with open(csv, encoding="utf-8") as f:
+            rows = [r for r in (line.strip() for line in f) if r]
+        if len(rows) < 2:
+            return None
+        header = [h.strip() for h in rows[0].split(",")]
+        idx = next((i for i, h in enumerate(header) if key in h), None)
+        if idx is None:
+            return None
+        return float(rows[-1].split(",")[idx].strip())
+    except Exception:                            # noqa: BLE001
+        return None
+
+
 def parse_metrics(text):
     """Extract the final validation metrics from the log's summary 'all …' row:
     returns {'P','R','mAP50','mAP50_95'} or None."""
