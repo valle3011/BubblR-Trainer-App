@@ -286,9 +286,9 @@ can pull it directly:
   the page so you only fix mistakes instead of drawing everything. (These live in
   the experimental Tools menu.)
 
-Models in that repo are published only by the maintainer, using
-`bubblr_publish.py` — it uploads a trained model with the next version number
-**only if it beats the currently published one** (compares mAP50-95).
+Models in that repo are published only by the maintainer (with a private tool
+that uploads a trained model under the next version number only if it beats the
+currently published one).
 
 ## Not just manga — any object detector
 

@@ -9,3 +9,7 @@ dist/
 runs/
 .DS_Store
 Thumbs.db
+
+# private uploader tool (maintainer only, kept local)
+bubblr_publish.py
+assets/upload_icon.*
