@@ -1,7 +1,13 @@
 {
-  "latest_version": "0.9.10",
+  "latest_version": "0.9.11",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-12",
+      "title": "Seamless updates on next start",
+      "text": "Updates now install themselves the next time you open BubblR Trainer — during the splash it swaps in the new build and relaunches once, with no dialog and no restart prompt (Krita-style). There's still an optional \"Install now\" button if you don't want to wait.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-12",
       "title": "Background images & smarter export summary",
@@ -11,14 +17,8 @@
     {
       "date": "2026-07-12",
       "title": "Automatic updates",
-      "text": "BubblR Trainer now checks for updates on start and downloads a new version in the background automatically. When it's ready, click \"Install & restart\" and it swaps itself out and reopens — no manual download needed. Turn it off under Settings → Display.",
+      "text": "BubblR Trainer checks for updates on start and downloads a new version in the background automatically. Turn it off under Settings → Display.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
-    },
-    {
-      "date": "2026-07-12",
-      "title": "News panel + update check",
-      "text": "The start page now shows news and tells you when a newer version is available — no need to open GitHub. Turn it off under Settings → Display.",
-      "url": "https://github.com/valle3011/BubblR-Trainer-App"
     },
     {
       "date": "2026-07-12",

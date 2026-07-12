@@ -34,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.10"
+VERSION = "0.9.11"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -75,6 +75,10 @@ RELEASES_URL = "https://github.com/valle3011/BubblR-Trainer-App/releases"
 UPDATE_ASSET = "BubblR-Trainer-win.zip"
 UPDATE_ZIP_URL = ("https://github.com/valle3011/BubblR-Trainer-App/releases/"
                   "latest/download/" + UPDATE_ASSET)
+# A downloaded update is unpacked here (in the user's home, so it survives a
+# restart) and applied on the *next* launch during the splash — no restart
+# prompt, one quick auto-relaunch (Krita-style).
+UPDATE_STAGE = os.path.join(os.path.expanduser("~"), ".bubblr_trainer_update")
 
 
 def _ver_tuple(v):
@@ -286,6 +290,8 @@ LANG = {
                                  "(Windows .exe only).",
         "update_downloading": "Downloading update…",
         "update_install": "Install & restart",
+        "update_ready_next": "Update v{v} downloaded — installs on next start.",
+        "update_install_now": "Install now",
         "update_confirm": "Install version {v} now? BubblR Trainer will close "
                           "and reopen automatically.",
         "update_failed": "Update could not be installed.",
@@ -555,6 +561,9 @@ LANG = {
                                  "installiert (nur Windows-.exe).",
         "update_downloading": "Update wird geladen…",
         "update_install": "Installieren & neu starten",
+        "update_ready_next": "Update v{v} geladen — wird beim nächsten Start "
+                             "installiert.",
+        "update_install_now": "Jetzt installieren",
         "update_confirm": "Version {v} jetzt installieren? BubblR Trainer wird "
                           "geschlossen und automatisch neu gestartet.",
         "update_failed": "Update konnte nicht installiert werden.",
@@ -1814,6 +1823,84 @@ class UpdateDownloader(QThread):
             self.done.emit(None)
 
 
+def _stage_update(zip_path):
+    """Unpack a downloaded update zip into the staging area and return the
+    folder that actually holds our .exe (the onedir root). Raises on trouble."""
+    stage = os.path.join(UPDATE_STAGE, "new")
+    shutil.rmtree(stage, ignore_errors=True)
+    os.makedirs(stage, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(stage)
+    exe_name = os.path.basename(sys.executable)
+    for root, _dirs, files in os.walk(stage):
+        if exe_name in files:
+            return root
+    raise ValueError("update package has no %s" % exe_name)
+
+
+def _launch_swap_helper(src):
+    """Write and launch a detached .bat that waits for this process to exit,
+    mirror-copies the staged build (src) over the install dir and relaunches."""
+    exe_name = os.path.basename(sys.executable)
+    dst = os.path.dirname(sys.executable)
+    os.makedirs(UPDATE_STAGE, exist_ok=True)
+    bat = os.path.join(UPDATE_STAGE, "apply_update.bat")
+    # /MIR mirrors src→dst (removing stale files); the staging area is outside
+    # dst so it is never touched. The guard aborts if the source looks wrong.
+    script = (
+        "@echo off\r\n"
+        "chcp 65001 >nul\r\n"
+        'if not exist "%s\\%s" ( exit /b 1 )\r\n'
+        ":wait\r\n"
+        'tasklist /fi "imagename eq %s" | find /i "%s" >nul '
+        "&& ( timeout /t 1 /nobreak >nul & goto wait )\r\n"
+        'robocopy "%s" "%s" /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n'
+        'start "" "%s\\%s"\r\n'
+    ) % (src, exe_name, exe_name, exe_name, src, dst, dst, exe_name)
+    with open(bat, "w", encoding="utf-8") as f:
+        f.write(script)
+    DETACHED = 0x00000008 | 0x00000200           # DETACHED | NEW_PROCESS_GROUP
+    subprocess.Popen(["cmd", "/c", bat], creationflags=DETACHED, close_fds=True)
+
+
+def _maybe_apply_pending_update():
+    """Called at startup (during the splash): if a newer build was downloaded in
+    a previous session, hand off to the swap helper and tell main() to quit so
+    the update is applied and the app relaunches — no dialog, one quick restart.
+    Returns True when a swap was launched (main() should exit)."""
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:                            # noqa: BLE001
+        return False
+    pu = cfg.get("pending_update")
+    if not isinstance(pu, dict):
+        return False
+    ver, src = pu.get("version"), pu.get("src")
+    exe_name = os.path.basename(sys.executable)
+    ok = (ver and _ver_tuple(ver) > _ver_tuple(VERSION)
+          and src and os.path.exists(os.path.join(src, exe_name)))
+    # Clear the flag up front either way: if already applied (version matches) or
+    # the staging is gone, drop it; if valid, clear so a failed swap can't loop.
+    cfg.pop("pending_update", None)
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:                            # noqa: BLE001
+        pass
+    if not ok:
+        if ver and _ver_tuple(ver) <= _ver_tuple(VERSION):
+            shutil.rmtree(UPDATE_STAGE, ignore_errors=True)   # applied → clean up
+        return False
+    try:
+        _launch_swap_helper(src)
+        return True
+    except Exception:                            # noqa: BLE001
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -1835,6 +1922,8 @@ class TrainerWindow(QMainWindow):
         self._news_enabled = bool(cfg.get("news_enabled", True))
         self._auto_update = bool(cfg.get("auto_update", True))  # Krita-style
         self._update_zip = None                  # path once downloaded
+        _pu = cfg.get("pending_update")          # staged update from last session
+        self._pending_update = _pu if isinstance(_pu, dict) else None
         self._auto_order = bool(cfg.get("auto_order_on", False))
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._center = bool(cfg.get("center_marker", True))  # in Settings now
@@ -2088,7 +2177,8 @@ class TrainerWindow(QMainWindow):
                 "export_summary": self._export_summary_on,
                 "export_bg": self._export_bg,
                 "news_enabled": self._news_enabled,
-                "auto_update": self._auto_update}
+                "auto_update": self._auto_update,
+                "pending_update": self._pending_update}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             # Only capture the docker layout while the EDITOR is showing AND the
@@ -2535,101 +2625,75 @@ class TrainerWindow(QMainWindow):
         self._auto_update = bool(on)
         self._save_settings()
 
-    # -- auto-update (download + one-click install) ---------------------------
+    # -- auto-update (background download → apply on next start) ---------------
     def _start_update_download(self):
-        """Fetch the latest-release zip into a temp file in the background."""
+        """Fetch the latest-release zip into the staging area in the background.
+        On success it is unpacked and applied on the *next* launch (no dialog)."""
         if getattr(self, "_update_thread", None) is not None:
             return                               # already running / downloaded
-        import tempfile
-        self._update_dir = tempfile.mkdtemp(prefix="bubblr_update_")
-        dest = os.path.join(self._update_dir, UPDATE_ASSET)
-        self.news_install_btn.setText(self._tr("update_downloading"))
-        self.news_install_btn.setEnabled(False)
-        self.news_install_btn.setVisible(True)
+        if self._pending_update:                 # already staged from before
+            self._show_update_ready()
+            return
+        os.makedirs(UPDATE_STAGE, exist_ok=True)
+        dest = os.path.join(UPDATE_STAGE, UPDATE_ASSET)
         self._update_thread = UpdateDownloader(UPDATE_ZIP_URL, dest, self)
         self._update_thread.progress.connect(self._on_update_progress)
         self._update_thread.done.connect(self._on_update_ready)
         self._update_thread.start()
 
     def _on_update_progress(self, pct):
-        self.news_install_btn.setText(
-            self._tr("update_downloading") + (" %d%%" % pct))
+        pass                                     # silent background download
 
     def _on_update_ready(self, path):
         self._update_thread = None
         if not path:                             # download failed → keep link
-            self.news_install_btn.setVisible(False)
             return
-        self._update_zip = path
-        self.news_install_btn.setText(self._tr("update_install"))
+        try:
+            src = _stage_update(path)            # unpack to a stable folder
+        except Exception:                        # noqa: BLE001
+            return
+        try:
+            os.remove(path)                      # zip no longer needed
+        except OSError:
+            pass
+        self._pending_update = {
+            "version": getattr(self, "_latest_version", ""), "src": src}
+        self._save_settings()                    # picked up on next start
+        self._show_update_ready()
+
+    def _show_update_ready(self):
+        """Tell the user the update is downloaded and will apply on next start,
+        and offer an optional 'install now' button (no dialog)."""
+        v = (self._pending_update or {}).get("version", "")
+        self.news_update.setText(self._tr("update_ready_next").format(v=v))
+        self.news_update.setVisible(True)
+        self.news_install_btn.setText(self._tr("update_install_now"))
         self.news_install_btn.setEnabled(True)
         self.news_install_btn.setVisible(True)
 
     def _install_update(self):
-        """Extract the downloaded zip and hand off to a helper that swaps the
-        install folder once this process exits, then relaunches."""
-        zip_path = self._update_zip
-        if not zip_path or not os.path.exists(zip_path):
-            return
-        if not getattr(sys, "frozen", False):
+        """Optional 'install now': apply the staged update immediately and quit
+        (the helper swaps files and relaunches). No confirmation dialog."""
+        pu = self._pending_update
+        if not pu or not getattr(sys, "frozen", False):
             QMessageBox.information(self, "BubblR Trainer",
                                     self._tr("update_src_only"))
             return
-        if QMessageBox.question(
-                self, self._tr("update_install"),
-                self._tr("update_confirm").format(
-                    v=getattr(self, "_latest_version", "")),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes) != QMessageBox.Yes:
+        src = pu.get("src")
+        exe_name = os.path.basename(sys.executable)
+        if not src or not os.path.exists(os.path.join(src, exe_name)):
             return
+        # Clear the pending flag so the next start doesn't try again after we
+        # apply it here-and-now.
+        self._pending_update = None
+        self._save_settings()
         try:
-            new_root = self._apply_update_windows(zip_path)
+            _launch_swap_helper(src)
         except Exception as e:                   # noqa: BLE001
             QMessageBox.warning(self, "BubblR Trainer",
                                 self._tr("update_failed") + "\n\n%s" % e)
             return
-        if new_root:
-            QApplication.quit()
-
-    def _apply_update_windows(self, zip_path):
-        """Unpack the zip and launch a detached .bat that waits for us to quit,
-        mirror-copies the new build over the install dir, and restarts it.
-        Returns the new-build folder path, or raises on any problem."""
-        extract = os.path.join(self._update_dir, "new")
-        if os.path.isdir(extract):
-            shutil.rmtree(extract, ignore_errors=True)
-        os.makedirs(extract, exist_ok=True)
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(extract)
-        # The zip holds the onedir folder; locate the one with our exe in it.
-        exe_name = os.path.basename(sys.executable)
-        src = None
-        for root, _dirs, files in os.walk(extract):
-            if exe_name in files:
-                src = root
-                break
-        if not src:
-            raise ValueError("update package has no %s" % exe_name)
-        dst = os.path.dirname(sys.executable)
-        bat = os.path.join(self._update_dir, "apply_update.bat")
-        # /MIR mirrors src→dst (removing stale files); temp is outside dst so it
-        # is never touched. The guard aborts if the source looks wrong.
-        script = (
-            "@echo off\r\n"
-            "chcp 65001 >nul\r\n"
-            'if not exist "%s\\%s" ( exit /b 1 )\r\n'
-            ":wait\r\n"
-            'tasklist /fi "imagename eq %s" | find /i "%s" >nul '
-            "&& ( timeout /t 1 /nobreak >nul & goto wait )\r\n"
-            'robocopy "%s" "%s" /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n'
-            'start "" "%s\\%s"\r\n'
-        ) % (src, exe_name, exe_name, exe_name, src, dst, dst, exe_name)
-        with open(bat, "w", encoding="utf-8") as f:
-            f.write(script)
-        DETACHED = 0x00000008 | 0x00000200       # DETACHED | NEW_PROCESS_GROUP
-        subprocess.Popen(["cmd", "/c", bat], creationflags=DETACHED,
-                         close_fds=True)
-        return src
+        QApplication.quit()
 
     def _on_recent_clicked(self, item):
         path = item.data(Qt.UserRole)
@@ -4805,6 +4869,11 @@ def main():
         splash = QSplashScreen(QPixmap(sp))
         splash.show()
         app.processEvents()
+
+    # If a newer build was downloaded last session, apply it now (during the
+    # splash) and relaunch — no dialog, one quick restart, Krita-style.
+    if _maybe_apply_pending_update():
+        return
 
     win = TrainerWindow()
     win.setWindowIcon(app_icon())

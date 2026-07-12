@@ -53,9 +53,11 @@ GitHub yourself. It only does an HTTPS GET of a public file (no personal data
 sent) and can be turned off under *Settings → Display*.
 
 **Automatic updates (Windows .exe):** when a newer version is found, BubblR
-Trainer downloads it in the background from the latest GitHub release. Once it's
-ready, a **“Install & restart”** button appears — one click closes the app,
-swaps in the new build and reopens it. Auto-download can be turned off under
+Trainer downloads it in the background from the latest GitHub release and stages
+it. It then installs itself **on the next launch** — during the splash it swaps
+in the new build and relaunches once, with **no dialog and no restart prompt**
+(Krita-style). If you'd rather not wait, an optional **“Install now”** button in
+the News column applies it straight away. Auto-download can be turned off under
 *Settings → Display*. The source (`.py`) version isn't self-replacing — update it
 with `git pull`.
 
