@@ -1,23 +1,23 @@
 {
-  "latest_version": "0.9.15",
+  "latest_version": "0.9.17",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
     {
       "date": "2026-07-12",
+      "title": "Model Trainer (experimental) + training guide",
+      "text": "A companion app, BubblR Model Trainer, trains a YOLO model from your exported dataset (or continue-trains an existing .pt). Enable it under Settings → Experimental, then Tools → Train a model…. Read Help → Model training guide for what you need. The window title bars are now dark to match the theme.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-12",
       "title": "COCO JSON export",
-      "text": "Turn on 'Also write COCO JSON' (Settings → Storage) to save annotations in COCO format next to the YOLO files — for Detectron2, MMDetection and other frameworks. Each object gets a bbox, area and polygon; with a val split you get separate train/val files.",
+      "text": "Turn on 'Also write COCO JSON' (Settings → Storage) to save annotations in COCO format next to the YOLO files — for Detectron2, MMDetection and other frameworks.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {
       "date": "2026-07-12",
-      "title": "Segmentation export (YOLO-seg)",
-      "text": "Turn on 'Export segmentation labels' (Settings → Storage) to write polygon outlines instead of boxes, so you can train instance segmentation. Pairs with the Polygon tool.",
-      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
-    },
-    {
-      "date": "2026-07-12",
-      "title": "New Polygon tool",
-      "text": "Click to drop points connected by straight lines (no dragging) and close by clicking the first point, double-clicking or pressing Enter. Perfect for irregular SFX shapes.",
+      "title": "Polygon tool & segmentation export",
+      "text": "New click-to-add-point Polygon tool, plus YOLO-seg polygon export so you can train instance segmentation, not just boxes.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {

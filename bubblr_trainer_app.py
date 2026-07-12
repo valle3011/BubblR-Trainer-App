@@ -34,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.15"
+VERSION = "0.9.17"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -237,6 +237,11 @@ LANG = {
         "rank_empty": "No ranked pages were produced.",
         "rank_loaded": "Loaded the top {n} ranked page(s).",
         "m_file": "File", "m_edit": "Edit", "m_page": "Page",
+        "m_tools": "Tools", "mi_train_model": "Train a model…",
+        "train_model_missing": "BubblR Model Trainer was not found next to this "
+                               "app. Download it from the project's Releases page "
+                               "(BubblR-Model-Trainer) and place it beside "
+                               "BubblR Trainer.",
         "m_view": "View", "m_settings": "Settings", "m_help": "Help",
         "mi_language": "Language",
         "mi_load": "Load images…", "mi_load_folder": "Load folder…",
@@ -260,6 +265,60 @@ LANG = {
         "mi_zoom_in": "Zoom in", "mi_zoom_out": "Zoom out",
         "mi_zoom_sel": "Zoom to selection", "mi_fit": "Fit to window",
         "mi_shortcuts": "Keyboard shortcuts…", "mi_about": "About…",
+        "mi_train_help": "Model training guide…",
+        "train_help_title": "How model training works",
+        "train_help_html": (
+            "<div style='color:#dfe3e7;font-size:13px;line-height:1.5'>"
+            "<h2 style='color:#3daee9'>Train your own AI model</h2>"
+            "<p>BubblR Trainer makes the <b>dataset</b>; the companion "
+            "<b>BubblR Model Trainer</b> turns it into a trained <b>YOLO</b> "
+            "model. The whole loop is: <b>label → export → train → best.pt</b>.</p>"
+            "<h3 style='color:#3daee9'>What you need</h3>"
+            "<ul>"
+            "<li><b>A labelled dataset</b> — draw boxes on your pages here, then "
+            "<i>File → Export all</i>. That writes <code>images/</code>, "
+            "<code>labels/</code> and a <code>data.yaml</code>.</li>"
+            "<li><b>Python with Ultralytics</b> — the Model Trainer has a "
+            "<i>Check</i> button and an <i>Install Ultralytics</i> button (needs "
+            "internet; it downloads PyTorch, which is large).</li>"
+            "<li><b>A GPU is optional</b> — an NVIDIA GPU (CUDA) trains much "
+            "faster, but a CPU also works, just slower.</li>"
+            "<li><b>Enough examples</b> — aim for dozens of boxes per class; more "
+            "and more varied images give a better model.</li>"
+            "</ul>"
+            "<h3 style='color:#3daee9'>Step by step</h3>"
+            "<ol>"
+            "<li>Label your pages and set a class for each box (keys 1–9).</li>"
+            "<li><i>File → Export all</i> → note the folder with "
+            "<code>data.yaml</code>.</li>"
+            "<li>Open the Model Trainer (enable it under <i>Settings → "
+            "Experimental</i>, then <i>Tools → Train a model…</i>).</li>"
+            "<li>Set the <b>Python environment</b> (Check / Install Ultralytics).</li>"
+            "<li>Pick your <b>data.yaml</b>, the <b>task</b> (detect or segment) "
+            "and a <b>base model</b> (YOLO11/YOLOv8 n→x). To improve an existing "
+            "model, choose <i>Custom model file…</i> and select its "
+            "<code>.pt</code>.</li>"
+            "<li>Set <b>epochs</b> (e.g. 100), <b>image size</b> (e.g. 640), "
+            "<b>batch</b> (-1 = auto), <b>device</b> and a run name.</li>"
+            "<li>Press <b>Start training</b> and watch the log/progress.</li>"
+            "</ol>"
+            "<h3 style='color:#3daee9'>Where your model ends up</h3>"
+            "<p>Next to your <code>data.yaml</code>: "
+            "<code>runs/&lt;run name&gt;/weights/best.pt</code> is your trained "
+            "model (<i>best.pt</i> = best epoch). The <b>Open results</b> button "
+            "opens that folder. Use it anywhere Ultralytics runs, e.g. "
+            "<code>YOLO(\"best.pt\").predict(\"image.png\")</code>.</p>"
+            "<h3 style='color:#3daee9'>Tips</h3>"
+            "<ul>"
+            "<li><b>Background images</b> (empty pages, <i>Settings → Storage</i>) "
+            "reduce false detections.</li>"
+            "<li>Keep classes <b>balanced</b> — the export summary warns if one "
+            "class has far fewer examples.</li>"
+            "<li>Starting from a <b>pretrained</b> base (the default) needs far "
+            "fewer images than training from scratch.</li>"
+            "<li>For <b>segmentation</b>, use the Polygon/Lasso tools and turn on "
+            "<i>Export segmentation labels</i>.</li>"
+            "</ul></div>"),
         "about_text": "Make YOLO training pages for BubblR — no Krita or "
                       "Photoshop needed.",
         "copied": "Box copied.",
@@ -295,6 +354,13 @@ LANG = {
                                  "the background and offer a one-click install "
                                  "(Windows .exe only).",
         "settings_updates": "Updates",
+        "settings_experimental": "Experimental",
+        "exp_intro": "Opt-in switches for features that are still in testing. "
+                     "They stay hidden until you turn them on here.",
+        "exp_trainer_toggle": "Enable BubblR Model Trainer",
+        "exp_trainer_hint": "Adds a Tools → Train a model… entry that opens the "
+                            "companion training app. Off by default while the "
+                            "Model Trainer is experimental.",
         "update_mode_auto": "Automatic",
         "update_mode_manual": "Manual",
         "update_mode_hint": "Automatic: a newer version is downloaded in the "
@@ -541,6 +607,11 @@ LANG = {
         "rank_empty": "Es wurden keine gerankten Seiten erzeugt.",
         "rank_loaded": "Top {n} gerankte Seite(n) geladen.",
         "m_file": "Datei", "m_edit": "Bearbeiten", "m_page": "Seite",
+        "m_tools": "Werkzeuge", "mi_train_model": "Modell trainieren…",
+        "train_model_missing": "BubblR Model Trainer wurde nicht neben dieser App "
+                               "gefunden. Lade ihn von der Releases-Seite des "
+                               "Projekts (BubblR-Model-Trainer) und lege ihn "
+                               "neben BubblR Trainer.",
         "m_view": "Ansicht", "m_settings": "Einstellungen", "m_help": "Hilfe",
         "mi_language": "Sprache",
         "mi_load": "Bilder laden…", "mi_load_folder": "Ordner laden…",
@@ -564,6 +635,63 @@ LANG = {
         "mi_zoom_in": "Vergrößern", "mi_zoom_out": "Verkleinern",
         "mi_zoom_sel": "Auf Auswahl zoomen", "mi_fit": "Einpassen",
         "mi_shortcuts": "Tastenkürzel…", "mi_about": "Über…",
+        "mi_train_help": "Modell-Training-Anleitung…",
+        "train_help_title": "Wie das Modell-Training funktioniert",
+        "train_help_html": (
+            "<div style='color:#dfe3e7;font-size:13px;line-height:1.5'>"
+            "<h2 style='color:#3daee9'>Eigenes KI-Modell trainieren</h2>"
+            "<p>BubblR Trainer erstellt den <b>Datensatz</b>; die begleitende "
+            "App <b>BubblR Model Trainer</b> macht daraus ein trainiertes "
+            "<b>YOLO</b>-Modell. Der Ablauf: <b>labeln → exportieren → "
+            "trainieren → best.pt</b>.</p>"
+            "<h3 style='color:#3daee9'>Was du brauchst</h3>"
+            "<ul>"
+            "<li><b>Ein gelabelter Datensatz</b> — hier Boxen auf die Seiten "
+            "zeichnen, dann <i>Datei → Export all</i>. Das schreibt "
+            "<code>images/</code>, <code>labels/</code> und eine "
+            "<code>data.yaml</code>.</li>"
+            "<li><b>Python mit Ultralytics</b> — der Model Trainer hat einen "
+            "<i>Check</i>-Knopf und einen <i>Install Ultralytics</i>-Knopf "
+            "(braucht Internet; lädt PyTorch, was groß ist).</li>"
+            "<li><b>GPU optional</b> — eine NVIDIA-GPU (CUDA) trainiert viel "
+            "schneller, aber CPU geht auch, nur langsamer.</li>"
+            "<li><b>Genug Beispiele</b> — pro Klasse möglichst Dutzende Boxen; "
+            "mehr und abwechslungsreichere Bilder = besseres Modell.</li>"
+            "</ul>"
+            "<h3 style='color:#3daee9'>Schritt für Schritt</h3>"
+            "<ol>"
+            "<li>Seiten labeln und jeder Box eine Klasse geben (Tasten 1–9).</li>"
+            "<li><i>Datei → Export all</i> → den Ordner mit "
+            "<code>data.yaml</code> merken.</li>"
+            "<li>Model Trainer öffnen (unter <i>Einstellungen → Experimentell</i> "
+            "aktivieren, dann <i>Werkzeuge → Modell trainieren…</i>).</li>"
+            "<li><b>Python-Umgebung</b> setzen (Check / Install Ultralytics).</li>"
+            "<li><b>data.yaml</b> wählen, <b>Aufgabe</b> (detect oder segment) und "
+            "ein <b>Basismodell</b> (YOLO11/YOLOv8 n→x). Zum Verbessern eines "
+            "bestehenden Modells <i>Custom model file…</i> wählen und dessen "
+            "<code>.pt</code> nehmen.</li>"
+            "<li><b>Epochen</b> (z. B. 100), <b>Bildgröße</b> (z. B. 640), "
+            "<b>Batch</b> (-1 = auto), <b>Gerät</b> und Run-Name setzen.</li>"
+            "<li><b>Start training</b> drücken und Log/Fortschritt beobachten.</li>"
+            "</ol>"
+            "<h3 style='color:#3daee9'>Wo dein Modell landet</h3>"
+            "<p>Neben deiner <code>data.yaml</code>: "
+            "<code>runs/&lt;Run-Name&gt;/weights/best.pt</code> ist dein "
+            "trainiertes Modell (<i>best.pt</i> = beste Epoche). Der Knopf "
+            "<b>Open results</b> öffnet den Ordner. Nutzbar überall, wo "
+            "Ultralytics läuft, z. B. "
+            "<code>YOLO(\"best.pt\").predict(\"bild.png\")</code>.</p>"
+            "<h3 style='color:#3daee9'>Tipps</h3>"
+            "<ul>"
+            "<li><b>Hintergrundbilder</b> (leere Seiten, <i>Einstellungen → "
+            "Speicherort</i>) verringern Fehlerkennungen.</li>"
+            "<li>Klassen <b>ausgewogen</b> halten — die Export-Zusammenfassung "
+            "warnt, wenn eine Klasse viel seltener ist.</li>"
+            "<li>Von einem <b>vortrainierten</b> Basismodell (Standard) zu starten "
+            "braucht viel weniger Bilder als von null.</li>"
+            "<li>Für <b>Segmentierung</b> die Polygon/Lasso-Werkzeuge nutzen und "
+            "<i>Segmentierungs-Labels exportieren</i> anschalten.</li>"
+            "</ul></div>"),
         "about_text": "Erzeugt YOLO-Trainingsseiten für BubblR — ohne Krita "
                       "oder Photoshop.",
         "copied": "Box kopiert.",
@@ -600,6 +728,15 @@ LANG = {
                                  "sie im Hintergrund geladen und per Klick "
                                  "installiert (nur Windows-.exe).",
         "settings_updates": "Updates",
+        "settings_experimental": "Experimentell",
+        "exp_intro": "Schalter zum Aktivieren von Funktionen, die noch in der "
+                     "Testphase sind. Sie bleiben verborgen, bis du sie hier "
+                     "einschaltest.",
+        "exp_trainer_toggle": "BubblR Model Trainer aktivieren",
+        "exp_trainer_hint": "Fügt einen Eintrag „Werkzeuge → Modell trainieren…“ "
+                            "hinzu, der die begleitende Trainings-App öffnet. "
+                            "Standardmäßig aus, solange der Model Trainer "
+                            "experimentell ist.",
         "update_mode_auto": "Automatisch",
         "update_mode_manual": "Manuell",
         "update_mode_hint": "Automatisch: eine neuere Version wird im Hintergrund "
@@ -2172,6 +2309,7 @@ class TrainerWindow(QMainWindow):
         self._seg_export = bool(cfg.get("seg_export", False))  # YOLO-seg polygons
         self._coco_export = bool(cfg.get("coco_export", False))  # + COCO JSON
         self._news_enabled = bool(cfg.get("news_enabled", True))
+        self._experimental_trainer = bool(cfg.get("exp_model_trainer", False))
         self._auto_update = bool(cfg.get("auto_update", True))  # Krita-style
         self._update_zip = None                  # path once downloaded
         _pu = cfg.get("pending_update")          # staged update from last session
@@ -2431,6 +2569,7 @@ class TrainerWindow(QMainWindow):
                 "seg_export": self._seg_export,
                 "coco_export": self._coco_export,
                 "news_enabled": self._news_enabled,
+                "exp_model_trainer": self._experimental_trainer,
                 "auto_update": self._auto_update,
                 "pending_update": self._pending_update}
         try:
@@ -3347,6 +3486,24 @@ class TrainerWindow(QMainWindow):
             self, self._tr("mi_about"),
             "BubblR Trainer v%s\n\n%s" % (VERSION, self._tr("about_text")))
 
+    def _show_train_help(self):
+        """A scrollable guide: how model training works and what you need."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self._tr("train_help_title"))
+        dlg.setWindowIcon(app_icon())
+        dlg.resize(640, 560)
+        lay = QVBoxLayout(dlg)
+        view = QTextBrowser()
+        view.setOpenExternalLinks(True)
+        view.setStyleSheet("background:#232629;")
+        view.setHtml(self._tr("train_help_html"))
+        lay.addWidget(view)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        bb.accepted.connect(dlg.accept)
+        lay.addWidget(bb)
+        dlg.exec_()
+
     # -- menu bar --
     def _build_menu(self):
         self._menu_titles = []               # (menu, key) for retranslation
@@ -3400,9 +3557,13 @@ class TrainerWindow(QMainWindow):
                 ("mi_lock_panels", "__lock__", None),
                 ("mi_discord", "__discord__", None),
             ]),
+            ("m_tools", [
+                ("mi_train_model", self._launch_model_trainer, None),
+            ]),
             ("m_settings", self._open_settings),   # opens the Settings window
             ("m_help", [
                 ("mi_shortcuts", self._show_shortcuts, "F1"),
+                ("mi_train_help", self._show_train_help, None),
                 ("mi_about", self._show_about, None),
             ]),
         ]
@@ -3415,6 +3576,8 @@ class TrainerWindow(QMainWindow):
                 continue
             menu = mb.addMenu(self._tr(mkey))
             self._menu_titles.append((menu, mkey))
+            if mkey == "m_tools":                 # gated behind the experimental flag
+                self._tools_menu = menu
             for item in items:
                 if item is None:
                     menu.addSeparator()
@@ -3454,6 +3617,47 @@ class TrainerWindow(QMainWindow):
                     act.setShortcut(QKeySequence(sc))
                 act.triggered.connect(lambda _checked=False, f=fn: f())
                 self._menu_actions.append((act, akey))
+        self._apply_experimental()
+
+    def _apply_experimental(self):
+        """Show the Tools menu (Model Trainer) only when the experimental flag
+        is on, so the companion app stays hidden until opted in."""
+        menu = getattr(self, "_tools_menu", None)
+        if menu is not None:
+            menu.menuAction().setVisible(bool(self._experimental_trainer))
+
+    def _launch_model_trainer(self):
+        """Open the companion BubblR Model Trainer (YOLO training GUI). Looks for
+        the bundled exe next to us (frozen) or the .py beside this script."""
+        home = os.path.expanduser("~")
+        if getattr(sys, "frozen", False):
+            here = os.path.dirname(sys.executable)
+            candidates = [
+                os.path.join(home, "BubblR Model Trainer",
+                             "BubblR-Model-Trainer.exe"),
+                os.path.join(here, "BubblR-Model-Trainer.exe"),
+                os.path.join(here, "BubblR-Model-Trainer",
+                             "BubblR-Model-Trainer.exe"),
+                os.path.join(os.path.dirname(here), "BubblR-Model-Trainer",
+                             "BubblR-Model-Trainer.exe")]
+            for exe in candidates:
+                if os.path.isfile(exe):
+                    try:
+                        subprocess.Popen([exe], close_fds=True)
+                        return
+                    except OSError:
+                        break
+        else:
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "bubblr_model_trainer.py")
+            if os.path.isfile(script):
+                try:
+                    subprocess.Popen([sys.executable, script], close_fds=True)
+                    return
+                except OSError:
+                    pass
+        QMessageBox.information(self, self._tr("mi_train_model"),
+                                self._tr("train_model_missing"))
 
     def _open_settings(self):
         """Modal Settings window with a left-hand tab list: Display (language)
@@ -3944,6 +4148,33 @@ class TrainerWindow(QMainWindow):
         sv.addWidget(coco_hint)
         sv.addStretch(1)
 
+        # -- Experimental page: opt-in switches for unfinished features --
+        exp = QWidget()
+        xv = QVBoxLayout(exp)
+        exp_title = QLabel()
+        exp_title.setStyleSheet("font-weight: bold;")
+        xv.addWidget(exp_title)
+        exp_intro = QLabel()
+        exp_intro.setWordWrap(True)
+        exp_intro.setStyleSheet("color: gray;")
+        xv.addWidget(exp_intro)
+        xv.addSpacing(10)
+        exp_trainer_box = QCheckBox()
+        exp_trainer_box.setChecked(self._experimental_trainer)
+
+        def on_exp_trainer(on):
+            self._experimental_trainer = bool(on)
+            self._save_settings()
+            self._apply_experimental()           # show/hide Tools menu live
+
+        exp_trainer_box.toggled.connect(on_exp_trainer)
+        xv.addWidget(exp_trainer_box)
+        exp_trainer_hint = QLabel()
+        exp_trainer_hint.setWordWrap(True)
+        exp_trainer_hint.setStyleSheet("color: gray;")
+        xv.addWidget(exp_trainer_hint)
+        xv.addStretch(1)
+
         stack.addWidget(disp)
         stack.addWidget(upd)
         stack.addWidget(newp)
@@ -3951,6 +4182,7 @@ class TrainerWindow(QMainWindow):
         stack.addWidget(toolsp)
         stack.addWidget(disc)
         stack.addWidget(store)
+        stack.addWidget(exp)
         nav.currentRowChanged.connect(stack.setCurrentIndex)
 
         def apply_texts():
@@ -3966,6 +4198,7 @@ class TrainerWindow(QMainWindow):
             nav.addItem(tr("settings_tools"))
             nav.addItem(tr("settings_discord"))
             nav.addItem(tr("settings_storage"))
+            nav.addItem(tr("settings_experimental"))
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
             cls_title.setText(tr("settings_classes"))
@@ -4013,6 +4246,10 @@ class TrainerWindow(QMainWindow):
             seg_hint.setText(tr("seg_export_hint"))
             coco_box.setText(tr("coco_export_toggle"))
             coco_hint.setText(tr("coco_export_hint"))
+            exp_title.setText(tr("settings_experimental"))
+            exp_intro.setText(tr("exp_intro"))
+            exp_trainer_box.setText(tr("exp_trainer_toggle"))
+            exp_trainer_hint.setText(tr("exp_trainer_hint"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -5378,6 +5615,31 @@ def _shortcut_command(desktop, startmenu):
     return "; ".join(lines)
 
 
+def dark_titlebar(win):
+    """Paint the native Windows title bar to match the dark theme instead of the
+    default white. Uses DWM: immersive dark mode (Win10 1809+) and, on Windows 11,
+    the exact caption + text colour. No-op / harmless on other OSes."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        hwnd = int(win.winId())                 # forces native handle creation
+        dwm = ctypes.windll.dwmapi
+        val = ctypes.c_int(1)
+        for attr in (20, 19):                   # DWMWA_USE_IMMERSIVE_DARK_MODE
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(val),
+                                      ctypes.sizeof(val))
+        # Windows 11 only: exact caption + text colour (COLORREF = 0x00BBGGRR)
+        caption = ctypes.c_int(0x003b3631)      # #31363b (theme window bg)
+        dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption),
+                                  ctypes.sizeof(caption))
+        text = ctypes.c_int(0x00f1f0ef)         # #eff0f1 (theme text)
+        dwm.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text),
+                                  ctypes.sizeof(text))
+    except Exception:                           # noqa: BLE001 (best-effort only)
+        pass
+
+
 def main():
     app = QApplication(sys.argv)
     apply_krita_dark(app)
@@ -5402,6 +5664,7 @@ def main():
 
     win = TrainerWindow()
     win.setWindowIcon(app_icon())
+    dark_titlebar(win)                      # dark caption bar (matches the theme)
     win.show()
     if splash is not None:
         splash.finish(win)

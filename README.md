@@ -245,6 +245,34 @@ their drawn outline; rectangles/wand use the box and ellipses are approximated.
 
 Classes: **bubble = 0**, **sfx = 1** by default.
 
+## Train a model (BubblR Model Trainer — experimental)
+
+A separate companion app, **BubblR Model Trainer**, turns your exported dataset
+into a trained model. It's a standalone download (`BubblR-Model-Trainer-win.zip`)
+with its own Desktop / Start-menu shortcuts. To open it from BubblR Trainer, first
+enable it under *Settings → Experimental → Enable BubblR Model Trainer*, then use
+*Tools → Train a model…*. Source users run `python bubblr_model_trainer.py`. There
+is also an in-app guide under *Help → Model training guide*.
+
+It's a thin GUI around **Ultralytics YOLO** — training runs in a **separate
+Python environment** you point it at, so the app itself stays small:
+
+1. **Python environment** — pick a `python.exe` that has Ultralytics (the
+   **Check** button verifies it and shows the PyTorch/CUDA status; **Install
+   Ultralytics** runs `pip install ultralytics` there for you).
+2. **Dataset & model** — choose the `data.yaml` from your export (it shows the
+   class count/names), pick **detect** or **segment**, then a **base model**
+   (YOLO11 / YOLOv8 n→x). To **continue training an existing model**, choose
+   *Custom model file…* and select a `.pt`.
+3. **Training settings** — epochs, image size, batch (`-1` = auto), device
+   (auto / cpu / GPU) and a run name.
+4. **Start training** — the live log streams in and the progress bar follows the
+   epochs. When it finishes, the best weights are at
+   `runs/<name>/weights/best.pt` (**Open results** jumps there).
+
+So end to end: **label in BubblR Trainer → export → train in BubblR Model
+Trainer → get a `best.pt`** you can use anywhere Ultralytics runs.
+
 ## Not just manga — any object detector
 
 The export is plain **YOLO detection data** (image + `class cx cy w h`), so the

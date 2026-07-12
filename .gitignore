@@ -4,5 +4,8 @@ build/
 dist/
 *.spec
 .deps_ok
+# downloaded / trained model weights and YOLO run outputs (never source)
+*.pt
+runs/
 .DS_Store
 Thumbs.db
