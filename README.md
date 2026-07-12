@@ -46,6 +46,12 @@ reappears whenever you close all pages.
 `.json` **anywhere onto the window** to load them — on the start page or while
 editing.
 
+**News & updates:** the start page has a **News** column that loads a small
+`news.json` from the project's GitHub on startup and shows an **“Update
+available”** banner when a newer version exists — so you don't have to check
+GitHub yourself. It only does an HTTPS GET of a public file (no personal data
+sent) and can be turned off under *Settings → Display*.
+
 ## How to label
 
 1. **Load images…** — pick one or many manga page images (PNG/JPG/…). They become

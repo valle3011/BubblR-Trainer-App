@@ -25,13 +25,14 @@ from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
     QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
-    QStyle, QWidgetItem, QTabWidget, QToolBar, QLineEdit, QColorDialog)
+    QStyle, QWidgetItem, QTabWidget, QToolBar, QLineEdit, QColorDialog,
+    QTextBrowser)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
-                          QSize, QProcess, QItemSelectionModel)
+                          QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.7"
+VERSION = "0.9.8"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -62,6 +63,20 @@ RECOVERY_FILE = os.path.join(os.path.expanduser("~"),
 # for everyone out of the box, with no per-user setup. Leave "" to disable the
 # built-in id (users can still enter their own in Settings -> Discord).
 DEFAULT_DISCORD_CLIENT_ID = "1525654247394246686"
+# News + update check: a tiny JSON in the repo, fetched over HTTPS (no server).
+# {"latest_version": "0.9.8", "url": "...releases", "items": [{title,date,text,url}]}
+NEWS_URL = ("https://raw.githubusercontent.com/valle3011/"
+            "BubblR-Trainer-App/main/news.json")
+RELEASES_URL = "https://github.com/valle3011/BubblR-Trainer-App/releases"
+
+
+def _ver_tuple(v):
+    """Turn '0.9.8' into (0, 9, 8) for comparison; ignores non-digits."""
+    out = []
+    for part in str(v).split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
 
 LANG = {
     "en": {
@@ -249,7 +264,15 @@ LANG = {
         "start_load": "Load images…", "start_folder": "Load folder…",
         "start_open": "Open project…", "start_rank": "Rank && load…",
         "start_heading": "Start", "start_clear": "Clear",
-        "start_recent": "Recent images",
+        "start_recent": "Recent images", "start_news": "News",
+        "news_loading": "Loading news…", "news_offline": "News unavailable (offline).",
+        "news_none": "No news yet.",
+        "news_update": "Update available: v{v}",
+        "news_download": "Download",
+        "settings_news": "Show news & check for updates",
+        "settings_news_hint": "Fetches a small news file from the project's "
+                              "GitHub on start (over HTTPS, no personal data "
+                              "sent) and tells you when a newer version exists.",
         "recent_missing": "That image no longer exists.",
         "mi_discord": "Show on Discord",
         "discord_need_id": "Set your Discord Application ID in Settings → Discord.",
@@ -489,7 +512,16 @@ LANG = {
         "start_load": "Bilder laden…", "start_folder": "Ordner laden…",
         "start_open": "Projekt öffnen…", "start_rank": "Rank && load…",
         "start_heading": "Start", "start_clear": "Leeren",
-        "start_recent": "Zuletzt geöffnet",
+        "start_recent": "Zuletzt geöffnet", "start_news": "News",
+        "news_loading": "News werden geladen…",
+        "news_offline": "News nicht verfügbar (offline).",
+        "news_none": "Noch keine News.",
+        "news_update": "Update verfügbar: v{v}",
+        "news_download": "Herunterladen",
+        "settings_news": "News anzeigen & auf Updates prüfen",
+        "settings_news_hint": "Lädt beim Start eine kleine News-Datei vom GitHub "
+                              "des Projekts (über HTTPS, keine persönlichen Daten) "
+                              "und meldet, wenn eine neuere Version verfügbar ist.",
         "recent_missing": "Dieses Bild existiert nicht mehr.",
         "mi_discord": "Auf Discord anzeigen",
         "discord_need_id": "Trage deine Discord-Application-ID unter "
@@ -1674,6 +1706,24 @@ class DiscordPresence:
         self._pipe = None
 
 
+class NewsFetcher(QThread):
+    """Fetch the repo's news.json in a background thread (no UI blocking); emits
+    the parsed dict, or None on any failure (offline etc.)."""
+    loaded = pyqtSignal(object)
+
+    def run(self):
+        data = None
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                NEWS_URL, headers={"User-Agent": "BubblR-Trainer"})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except Exception:                        # noqa: BLE001 (offline etc.)
+            data = None
+        self.loaded.emit(data)
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -1691,6 +1741,7 @@ class TrainerWindow(QMainWindow):
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
         self._export_summary_on = bool(cfg.get("export_summary", True))
+        self._news_enabled = bool(cfg.get("news_enabled", True))
         self._auto_order = bool(cfg.get("auto_order_on", False))
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._center = bool(cfg.get("center_marker", True))  # in Settings now
@@ -1917,6 +1968,7 @@ class TrainerWindow(QMainWindow):
         self._apply_classes()                # push classes to overlay + filter
         self._refresh()
         self._start_discord()                # show "in BubblR Trainer" if enabled
+        self._start_news()                   # fetch news / check for updates
 
     # -- settings / i18n --
     def _tr(self, key):
@@ -1940,7 +1992,8 @@ class TrainerWindow(QMainWindow):
                 "discord_client_id": self._discord_id,
                 "recent": self._recent[:40], "classes": self._classes,
                 "val_split": self._val_split,
-                "export_summary": self._export_summary_on}
+                "export_summary": self._export_summary_on,
+                "news_enabled": self._news_enabled}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             # Only capture the docker layout while the EDITOR is showing AND the
@@ -2288,12 +2341,87 @@ class TrainerWindow(QMainWindow):
         self.recent_list.itemClicked.connect(self._on_recent_clicked)
         right.addWidget(self.recent_list, 1)
         outer.addLayout(right, 1)
+
+        # --- News column (fetched from the repo; update banner on top) ---
+        news_col = QVBoxLayout()
+        news_col.setSpacing(8)
+        self.start_news_lbl = QLabel(self._tr("start_news"))
+        self.start_news_lbl.setStyleSheet("font-weight: bold;")
+        news_col.addWidget(self.start_news_lbl)
+        self.news_update = QLabel()
+        self.news_update.setWordWrap(True)
+        self.news_update.setOpenExternalLinks(True)
+        self.news_update.setStyleSheet(
+            "background:#2f6f3f;color:#eaffea;border-radius:5px;padding:7px;")
+        self.news_update.setVisible(False)
+        news_col.addWidget(self.news_update)
+        self.news_view = QTextBrowser()
+        self.news_view.setOpenExternalLinks(True)
+        self.news_view.setFrameShape(QFrame.NoFrame)
+        self.news_view.setStyleSheet("background:transparent;")
+        news_col.addWidget(self.news_view, 1)
+        self.news_host = QWidget()
+        self.news_host.setLayout(news_col)
+        self.news_host.setFixedWidth(300)
+        outer.addWidget(self.news_host)
         return page
 
     def _on_clear_recent(self):
         self._recent = []
         self._save_settings()
         self._rebuild_recent()
+
+    # -- news / update check --------------------------------------------------
+    def _start_news(self):
+        if not hasattr(self, "news_host"):
+            return
+        self.news_host.setVisible(self._news_enabled)
+        if not self._news_enabled:
+            return
+        self.news_view.setHtml(
+            "<p style='color:gray'>%s</p>" % self._tr("news_loading"))
+        self._news_thread = NewsFetcher(self)
+        self._news_thread.loaded.connect(self._on_news)
+        self._news_thread.start()
+
+    def _on_news(self, data):
+        if not data:
+            self.news_view.setHtml(
+                "<p style='color:gray'>%s</p>" % self._tr("news_offline"))
+            return
+        latest = data.get("latest_version")
+        if latest and _ver_tuple(latest) > _ver_tuple(VERSION):
+            url = data.get("url") or RELEASES_URL
+            self.news_update.setText(
+                "%s &nbsp; <a href='%s' style='color:#bfffcf'>%s</a>" % (
+                    self._tr("news_update").format(v=latest), url,
+                    self._tr("news_download")))
+            self.news_update.setVisible(True)
+        else:
+            self.news_update.setVisible(False)
+        items = data.get("items") or []
+        if not items:
+            self.news_view.setHtml(
+                "<p style='color:gray'>%s</p>" % self._tr("news_none"))
+            return
+        parts = []
+        for it in items[:25]:
+            title = it.get("title", "")
+            url = it.get("url")
+            head = ("<a href='%s' style='color:#6cc0ff;text-decoration:none'>"
+                    "%s</a>" % (url, title)) if url else title
+            body = ("<br>" + it["text"]) if it.get("text") else ""
+            parts.append(
+                "<p style='margin:0 0 12px 0'><b>%s</b>%s<br>"
+                "<span style='color:gray;font-size:11px'>%s</span></p>"
+                % (head, body, it.get("date", "")))
+        self.news_view.setHtml(
+            "<div style='color:#dfe3e7'>" + "".join(parts) + "</div>")
+
+    def set_news_enabled(self, on):
+        self._news_enabled = bool(on)
+        self._save_settings()
+        self._start_news()
 
     def _on_recent_clicked(self, item):
         path = item.data(Qt.UserRole)
@@ -2776,6 +2904,15 @@ class TrainerWindow(QMainWindow):
         center_hint.setWordWrap(True)
         center_hint.setStyleSheet("color: gray;")
         dv.addWidget(center_hint)
+        dv.addSpacing(10)
+        news_box = QCheckBox()
+        news_box.setChecked(self._news_enabled)
+        news_box.toggled.connect(lambda on: self.set_news_enabled(on))
+        dv.addWidget(news_box)
+        news_hint = QLabel()
+        news_hint.setWordWrap(True)
+        news_hint.setStyleSheet("color: gray;")
+        dv.addWidget(news_hint)
         dv.addStretch(1)
 
         # -- New boxes page: default class for a freshly drawn box --
@@ -3095,6 +3232,8 @@ class TrainerWindow(QMainWindow):
             lang_title.setText(tr("mi_language"))
             center_box.setText(tr("center_marker"))
             center_hint.setText(tr("center_marker_tip"))
+            news_box.setText(tr("settings_news"))
+            news_hint.setText(tr("settings_news_hint"))
             newk_title.setText(tr("settings_newbox"))
             newk_hint.setText(tr("settings_newbox_hint"))
             wand_title.setText(tr("settings_tools"))
@@ -3415,6 +3554,7 @@ class TrainerWindow(QMainWindow):
             self.start_heading.setText(t("start_heading"))
             self.start_recent_lbl.setText(t("start_recent"))
             self.start_clear.setText(t("start_clear"))
+            self.start_news_lbl.setText(t("start_news"))
             for b, key in self._start_btns:
                 b.setText(t(key))
         self._refresh()

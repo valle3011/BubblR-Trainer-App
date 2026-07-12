@@ -1,0 +1,22 @@
+{
+  "latest_version": "0.9.8",
+  "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
+  "items": [
+    {
+      "date": "2026-07-12",
+      "title": "News panel + update check",
+      "text": "The start page now shows news and tells you when a newer version is available — no need to open GitHub. Turn it off under Settings → Display.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App"
+    },
+    {
+      "date": "2026-07-12",
+      "title": "Custom classes & YOLO export",
+      "text": "Define your own detection classes (Settings → Classes), import them from a classes.txt / data.yaml, and export classes.txt + data.yaml with an optional train/val split — train any object detector, not just manga bubbles."
+    },
+    {
+      "date": "2026-07-12",
+      "title": "Krita-style start page & drag-and-drop",
+      "text": "Recent-images grid, dockable Tools / Boxes / Pages panels, and drag images, a folder or a project onto the window to load them."
+    }
+  ]
+}
