@@ -31,7 +31,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "0.9.5"
+VERSION = "0.9.6"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -85,8 +85,8 @@ LANG = {
         "clear": "Clear all page",
         "kind": "New box is:", "bubble": "Bubble", "sfx": "SFX",
         "relabel": "(click a box first to relabel it)",
-        "counts": "This page - Bubbles: {b}   SFX: {s}   |   Pages: {done}/{p} "
-                  "labelled, {exp} exported",
+        "counts_this_page": "This page",
+        "counts_pages": "Pages: {done}/{p} labelled, {exp} exported",
         "sort_by": "Sort pages:",
         "sort_name": "by name",
         "sort_unlabeled": "unlabelled first",
@@ -320,8 +320,8 @@ LANG = {
         "clear": "Seite leeren",
         "kind": "Neue Box ist:", "bubble": "Bubble", "sfx": "SFX",
         "relabel": "(erst eine Box anklicken, um sie umzulabeln)",
-        "counts": "Diese Seite – Bubbles: {b}   SFX: {s}   |   Seiten: {done}/{p} "
-                  "gelabelt, {exp} exportiert",
+        "counts_this_page": "Diese Seite",
+        "counts_pages": "Seiten: {done}/{p} gelabelt, {exp} exportiert",
         "sort_by": "Seiten sortieren:",
         "sort_name": "nach Name",
         "sort_unlabeled": "ungelabelte zuerst",
@@ -3424,13 +3424,19 @@ class TrainerWindow(QMainWindow):
         elif cur not in self._sel:
             self._sel = {cur}
         self.overlay.set_boxes(boxes, cur, self._sel)
-        b = sum(1 for x in boxes if x.get("kind") != "sfx")
-        s = sum(1 for x in boxes if x.get("kind") == "sfx")
+        # per-class object counts for the current page (all configured classes)
+        per = {c["key"]: 0 for c in self._classes}
+        for x in boxes:
+            k = x.get("kind", "bubble")
+            per[k] = per.get(k, 0) + 1
+        cls_str = "   ".join("%s: %d" % (c["label"], per.get(c["key"], 0))
+                             for c in self._classes)
         done = sum(1 for p in self._pages if p["boxes"])
         exp = sum(1 for p in self._pages if p.get("exported"))
         total = len(self._pages)
-        self.lbl_counts.setText(self._tr("counts").format(
-            b=b, s=s, p=total, done=done, exp=exp))
+        self.lbl_counts.setText("%s — %s   |   %s" % (
+            self._tr("counts_this_page"), cls_str,
+            self._tr("counts_pages").format(p=total, done=done, exp=exp)))
         if pg:
             self.page_lbl.setText(self._tr("page").format(
                 i=self._cur + 1, n=len(self._pages), name=pg["name"]))
