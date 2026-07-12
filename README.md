@@ -185,6 +185,11 @@ data.yaml                      YOLO / Ultralytics dataset config (path, train,
                                val, nc, names) — train straight from it
 ```
 
+Set a **validation split** under *Settings → Storage location* (e.g. 10–20 %):
+that share of pages goes to `images/val` + `labels/val` instead of `train`, the
+split is **stable per page** (so a page never lands in both across exports), and
+`data.yaml`'s `val:` points at it. 0 % keeps everything in `train`.
+
 Classes: **bubble = 0**, **sfx = 1** by default.
 
 ## Not just manga — any object detector

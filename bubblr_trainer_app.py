@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel,
@@ -30,7 +31,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel)
 
-VERSION = "0.9.2"
+VERSION = "0.9.3"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -263,6 +264,10 @@ LANG = {
                                 "still change any box later with the right-click "
                                 "menu or the B / S keys.",
         "settings_folder_title": "Dataset / export folder",
+        "val_split": "Validation split:",
+        "val_split_hint": "Put this share of pages into images/val + labels/val "
+                          "instead of train (0 = all to train). The split is "
+                          "stable per page, and data.yaml points val there.",
         "settings_folder_none": "(no folder chosen yet)",
         "settings_open": "Settings…",
         "settings_layout": "Panels & layout",
@@ -492,6 +497,10 @@ LANG = {
                                 "bekommt. Jede Box lässt sich später per "
                                 "Rechtsklick-Menü oder mit den Tasten B / S ändern.",
         "settings_folder_title": "Dataset-/Export-Ordner",
+        "val_split": "Validierungs-Anteil:",
+        "val_split_hint": "Diesen Anteil der Seiten nach images/val + labels/val "
+                          "statt train exportieren (0 = alles nach train). Der "
+                          "Split ist pro Seite stabil, und data.yaml zeigt darauf.",
         "settings_folder_none": "(noch kein Ordner gewählt)",
         "settings_open": "Einstellungen…",
         "settings_layout": "Panels & Layout",
@@ -1665,6 +1674,7 @@ class TrainerWindow(QMainWindow):
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
+        self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
         self._auto_order = bool(cfg.get("auto_order_on", False))
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._center = bool(cfg.get("center_marker", True))  # in Settings now
@@ -1912,7 +1922,8 @@ class TrainerWindow(QMainWindow):
                 "center_marker": self._center, "last_dir": self._last_dir,
                 "discord_enabled": self._discord_enabled,
                 "discord_client_id": self._discord_id,
-                "recent": self._recent[:40], "classes": self._classes}
+                "recent": self._recent[:40], "classes": self._classes,
+                "val_split": self._val_split}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             # Only capture the docker layout while the EDITOR is showing AND the
@@ -2929,6 +2940,28 @@ class TrainerWindow(QMainWindow):
         choose_btn.clicked.connect(choose)
         sv.addWidget(choose_btn)
         sv.addWidget(path_lbl)
+        sv.addSpacing(14)
+        val_row = QHBoxLayout()
+        val_lbl = QLabel()
+        val_spin = QSpinBox()
+        val_spin.setRange(0, 50)
+        val_spin.setValue(self._val_split)
+        val_spin.setSuffix(" %")
+        val_spin.setFixedWidth(80)
+
+        def on_val(v):
+            self._val_split = int(v)
+            self._save_settings()
+
+        val_spin.valueChanged.connect(on_val)
+        val_row.addWidget(val_lbl)
+        val_row.addWidget(val_spin)
+        val_row.addStretch(1)
+        sv.addLayout(val_row)
+        val_hint = QLabel()
+        val_hint.setWordWrap(True)
+        val_hint.setStyleSheet("color: gray;")
+        sv.addWidget(val_hint)
         sv.addStretch(1)
 
         stack.addWidget(disp)
@@ -2977,6 +3010,8 @@ class TrainerWindow(QMainWindow):
             store_title.setText(tr("settings_folder_title"))
             choose_btn.setText(tr("mi_folder"))
             path_lbl.setText(self._folder or tr("settings_folder_none"))
+            val_lbl.setText(tr("val_split"))
+            val_hint.setText(tr("val_split_hint"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -3895,12 +3930,22 @@ class TrainerWindow(QMainWindow):
         pg["exported"] = True         # mark it saved so the strip shows a ✓
         return stem
 
+    @staticmethod
+    def _page_bucket(pg):
+        """A stable 0..99 bucket for a page (by its source path/name), so the
+        same page always lands in the same train/val split across exports."""
+        key = (pg.get("path") or pg.get("name") or "").encode("utf-8", "ignore")
+        return zlib.crc32(key) % 100
+
     def _write_class_files(self):
         """Write classes.txt + data.yaml to the dataset root so the export can be
         trained with YOLO/Ultralytics straight away."""
         if not self._folder or not os.path.isdir(self._folder):
             return
         names = [c["label"] for c in self._classes]
+        val = "images/val" if self._val_split > 0 else "images/train"
+        val_note = ("" if self._val_split > 0
+                    else "        # no held-out split is made here")
         try:
             with open(os.path.join(self._folder, "classes.txt"), "w",
                       encoding="utf-8") as fh:
@@ -3910,7 +3955,7 @@ class TrainerWindow(QMainWindow):
                 "# BubblR Trainer export — YOLO / Ultralytics dataset config",
                 "path: %s" % root,
                 "train: images/train",
-                "val: images/train        # no held-out split is made here",
+                "val: %s%s" % (val, val_note),
                 "nc: %d" % len(names),
                 "names:",
             ]
@@ -3936,15 +3981,25 @@ class TrainerWindow(QMainWindow):
             self._status(self._tr("no_folder"), error=True)
             return
         try:
-            images = os.path.join(self._folder, "images", "train")
-            labels = os.path.join(self._folder, "labels", "train")
-            order = os.path.join(self._folder, "order")
-            preview = os.path.join(self._folder, "preview")
-            for d in (images, labels, order, preview):
+            base = self._folder
+            images_tr = os.path.join(base, "images", "train")
+            labels_tr = os.path.join(base, "labels", "train")
+            images_va = os.path.join(base, "images", "val")
+            labels_va = os.path.join(base, "labels", "val")
+            order = os.path.join(base, "order")
+            preview = os.path.join(base, "preview")
+            dirs = [images_tr, labels_tr, order, preview]
+            if self._val_split > 0:
+                dirs += [images_va, labels_va]
+            for d in dirs:
                 os.makedirs(d, exist_ok=True)
             last = ""
             for pg in pages:
-                last = self._export_page(pg, images, labels, order, preview)
+                to_val = (self._val_split > 0
+                          and self._page_bucket(pg) < self._val_split)
+                imgs = images_va if to_val else images_tr
+                lbls = labels_va if to_val else labels_tr
+                last = self._export_page(pg, imgs, lbls, order, preview)
                 time.sleep(0.002)      # keep timestamp stems unique
             self._write_class_files()  # classes.txt + data.yaml for YOLO
         except Exception as exc:
