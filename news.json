@@ -1,7 +1,13 @@
 {
-  "latest_version": "0.9.8",
+  "latest_version": "0.9.9",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-12",
+      "title": "Automatic updates",
+      "text": "BubblR Trainer now checks for updates on start and downloads a new version in the background automatically. When it's ready, click \"Install & restart\" and it swaps itself out and reopens — no manual download needed. Turn it off under Settings → Display.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-12",
       "title": "News panel + update check",

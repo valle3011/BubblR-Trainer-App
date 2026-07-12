@@ -52,6 +52,13 @@ available”** banner when a newer version exists — so you don't have to check
 GitHub yourself. It only does an HTTPS GET of a public file (no personal data
 sent) and can be turned off under *Settings → Display*.
 
+**Automatic updates (Windows .exe):** when a newer version is found, BubblR
+Trainer downloads it in the background from the latest GitHub release. Once it's
+ready, a **“Install & restart”** button appears — one click closes the app,
+swaps in the new build and reopens it. Auto-download can be turned off under
+*Settings → Display*. The source (`.py`) version isn't self-replacing — update it
+with `git pull`.
+
 ## How to label
 
 1. **Load images…** — pick one or many manga page images (PNG/JPG/…). They become

@@ -11,11 +11,13 @@ import copy
 import json
 import math
 import os
+import shutil
 import struct
 import subprocess
 import sys
 import threading
 import time
+import zipfile
 import zlib
 
 from PyQt5.QtWidgets import (
@@ -32,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.8"
+VERSION = "0.9.9"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -68,6 +70,11 @@ DEFAULT_DISCORD_CLIENT_ID = "1525654247394246686"
 NEWS_URL = ("https://raw.githubusercontent.com/valle3011/"
             "BubblR-Trainer-App/main/news.json")
 RELEASES_URL = "https://github.com/valle3011/BubblR-Trainer-App/releases"
+# The auto-updater downloads this asset from the latest GitHub release (a zip of
+# the onedir build). The "latest/download" URL always points at the newest one.
+UPDATE_ASSET = "BubblR-Trainer-win.zip"
+UPDATE_ZIP_URL = ("https://github.com/valle3011/BubblR-Trainer-App/releases/"
+                  "latest/download/" + UPDATE_ASSET)
 
 
 def _ver_tuple(v):
@@ -273,6 +280,17 @@ LANG = {
         "settings_news_hint": "Fetches a small news file from the project's "
                               "GitHub on start (over HTTPS, no personal data "
                               "sent) and tells you when a newer version exists.",
+        "settings_autoupd": "Download updates automatically",
+        "settings_autoupd_hint": "When a newer version is found, download it in "
+                                 "the background and offer a one-click install "
+                                 "(Windows .exe only).",
+        "update_downloading": "Downloading update…",
+        "update_install": "Install & restart",
+        "update_confirm": "Install version {v} now? BubblR Trainer will close "
+                          "and reopen automatically.",
+        "update_failed": "Update could not be installed.",
+        "update_src_only": "Auto-install works on the Windows .exe build only. "
+                           "For the source version, run: git pull",
         "recent_missing": "That image no longer exists.",
         "mi_discord": "Show on Discord",
         "discord_need_id": "Set your Discord Application ID in Settings → Discord.",
@@ -522,6 +540,17 @@ LANG = {
         "settings_news_hint": "Lädt beim Start eine kleine News-Datei vom GitHub "
                               "des Projekts (über HTTPS, keine persönlichen Daten) "
                               "und meldet, wenn eine neuere Version verfügbar ist.",
+        "settings_autoupd": "Updates automatisch herunterladen",
+        "settings_autoupd_hint": "Wenn eine neuere Version gefunden wird, wird "
+                                 "sie im Hintergrund geladen und per Klick "
+                                 "installiert (nur Windows-.exe).",
+        "update_downloading": "Update wird geladen…",
+        "update_install": "Installieren & neu starten",
+        "update_confirm": "Version {v} jetzt installieren? BubblR Trainer wird "
+                          "geschlossen und automatisch neu gestartet.",
+        "update_failed": "Update konnte nicht installiert werden.",
+        "update_src_only": "Die Auto-Installation funktioniert nur mit der "
+                           "Windows-.exe. Für die Quellcode-Version: git pull",
         "recent_missing": "Dieses Bild existiert nicht mehr.",
         "mi_discord": "Auf Discord anzeigen",
         "discord_need_id": "Trage deine Discord-Application-ID unter "
@@ -1724,6 +1753,49 @@ class NewsFetcher(QThread):
         self.loaded.emit(data)
 
 
+class UpdateDownloader(QThread):
+    """Download the latest-release zip in the background (Krita-style: fetched
+    automatically as soon as an update is detected). Emits the saved file path
+    on success or None on any failure, plus coarse progress in percent."""
+    progress = pyqtSignal(int)
+    done = pyqtSignal(object)                     # str path, or None on failure
+
+    def __init__(self, url, dest, parent=None):
+        super(UpdateDownloader, self).__init__(parent)
+        self._url = url
+        self._dest = dest
+
+    def run(self):
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                self._url, headers={"User-Agent": "BubblR-Trainer"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                total = int(r.headers.get("Content-Length", 0) or 0)
+                got = 0
+                with open(self._dest, "wb") as f:
+                    while True:
+                        chunk = r.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        got += len(chunk)
+                        if total > 0:
+                            self.progress.emit(min(100, int(got * 100 / total)))
+            # A too-small file means we hit an HTML error page, not a real zip.
+            if os.path.getsize(self._dest) < 4096 or not zipfile.is_zipfile(
+                    self._dest):
+                raise ValueError("downloaded file is not a valid zip")
+            self.done.emit(self._dest)
+        except Exception:                        # noqa: BLE001 (offline etc.)
+            try:
+                if os.path.exists(self._dest):
+                    os.remove(self._dest)
+            except OSError:
+                pass
+            self.done.emit(None)
+
+
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
@@ -1742,6 +1814,8 @@ class TrainerWindow(QMainWindow):
         self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
         self._export_summary_on = bool(cfg.get("export_summary", True))
         self._news_enabled = bool(cfg.get("news_enabled", True))
+        self._auto_update = bool(cfg.get("auto_update", True))  # Krita-style
+        self._update_zip = None                  # path once downloaded
         self._auto_order = bool(cfg.get("auto_order_on", False))
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._center = bool(cfg.get("center_marker", True))  # in Settings now
@@ -1993,7 +2067,8 @@ class TrainerWindow(QMainWindow):
                 "recent": self._recent[:40], "classes": self._classes,
                 "val_split": self._val_split,
                 "export_summary": self._export_summary_on,
-                "news_enabled": self._news_enabled}
+                "news_enabled": self._news_enabled,
+                "auto_update": self._auto_update}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
             # Only capture the docker layout while the EDITOR is showing AND the
@@ -2355,6 +2430,13 @@ class TrainerWindow(QMainWindow):
             "background:#2f6f3f;color:#eaffea;border-radius:5px;padding:7px;")
         self.news_update.setVisible(False)
         news_col.addWidget(self.news_update)
+        self.news_install_btn = QPushButton(self._tr("update_install"))
+        self.news_install_btn.setStyleSheet(
+            "background:#2f6f3f;color:#eaffea;font-weight:bold;"
+            "border:none;border-radius:5px;padding:8px;")
+        self.news_install_btn.clicked.connect(self._install_update)
+        self.news_install_btn.setVisible(False)
+        news_col.addWidget(self.news_install_btn)
         self.news_view = QTextBrowser()
         self.news_view.setOpenExternalLinks(True)
         self.news_view.setFrameShape(QFrame.NoFrame)
@@ -2391,14 +2473,20 @@ class TrainerWindow(QMainWindow):
             return
         latest = data.get("latest_version")
         if latest and _ver_tuple(latest) > _ver_tuple(VERSION):
+            self._latest_version = latest
             url = data.get("url") or RELEASES_URL
             self.news_update.setText(
                 "%s &nbsp; <a href='%s' style='color:#bfffcf'>%s</a>" % (
                     self._tr("news_update").format(v=latest), url,
                     self._tr("news_download")))
             self.news_update.setVisible(True)
+            # Krita-style: on a frozen (.exe) build, pull the update down
+            # automatically in the background, then offer one-click install.
+            if self._auto_update and getattr(sys, "frozen", False):
+                self._start_update_download()
         else:
             self.news_update.setVisible(False)
+            self.news_install_btn.setVisible(False)
         items = data.get("items") or []
         if not items:
             self.news_view.setHtml(
@@ -2422,6 +2510,106 @@ class TrainerWindow(QMainWindow):
         self._news_enabled = bool(on)
         self._save_settings()
         self._start_news()
+
+    def set_auto_update(self, on):
+        self._auto_update = bool(on)
+        self._save_settings()
+
+    # -- auto-update (download + one-click install) ---------------------------
+    def _start_update_download(self):
+        """Fetch the latest-release zip into a temp file in the background."""
+        if getattr(self, "_update_thread", None) is not None:
+            return                               # already running / downloaded
+        import tempfile
+        self._update_dir = tempfile.mkdtemp(prefix="bubblr_update_")
+        dest = os.path.join(self._update_dir, UPDATE_ASSET)
+        self.news_install_btn.setText(self._tr("update_downloading"))
+        self.news_install_btn.setEnabled(False)
+        self.news_install_btn.setVisible(True)
+        self._update_thread = UpdateDownloader(UPDATE_ZIP_URL, dest, self)
+        self._update_thread.progress.connect(self._on_update_progress)
+        self._update_thread.done.connect(self._on_update_ready)
+        self._update_thread.start()
+
+    def _on_update_progress(self, pct):
+        self.news_install_btn.setText(
+            self._tr("update_downloading") + (" %d%%" % pct))
+
+    def _on_update_ready(self, path):
+        self._update_thread = None
+        if not path:                             # download failed → keep link
+            self.news_install_btn.setVisible(False)
+            return
+        self._update_zip = path
+        self.news_install_btn.setText(self._tr("update_install"))
+        self.news_install_btn.setEnabled(True)
+        self.news_install_btn.setVisible(True)
+
+    def _install_update(self):
+        """Extract the downloaded zip and hand off to a helper that swaps the
+        install folder once this process exits, then relaunches."""
+        zip_path = self._update_zip
+        if not zip_path or not os.path.exists(zip_path):
+            return
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(self, "BubblR Trainer",
+                                    self._tr("update_src_only"))
+            return
+        if QMessageBox.question(
+                self, self._tr("update_install"),
+                self._tr("update_confirm").format(
+                    v=getattr(self, "_latest_version", "")),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes) != QMessageBox.Yes:
+            return
+        try:
+            new_root = self._apply_update_windows(zip_path)
+        except Exception as e:                   # noqa: BLE001
+            QMessageBox.warning(self, "BubblR Trainer",
+                                self._tr("update_failed") + "\n\n%s" % e)
+            return
+        if new_root:
+            QApplication.quit()
+
+    def _apply_update_windows(self, zip_path):
+        """Unpack the zip and launch a detached .bat that waits for us to quit,
+        mirror-copies the new build over the install dir, and restarts it.
+        Returns the new-build folder path, or raises on any problem."""
+        extract = os.path.join(self._update_dir, "new")
+        if os.path.isdir(extract):
+            shutil.rmtree(extract, ignore_errors=True)
+        os.makedirs(extract, exist_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(extract)
+        # The zip holds the onedir folder; locate the one with our exe in it.
+        exe_name = os.path.basename(sys.executable)
+        src = None
+        for root, _dirs, files in os.walk(extract):
+            if exe_name in files:
+                src = root
+                break
+        if not src:
+            raise ValueError("update package has no %s" % exe_name)
+        dst = os.path.dirname(sys.executable)
+        bat = os.path.join(self._update_dir, "apply_update.bat")
+        # /MIR mirrors src→dst (removing stale files); temp is outside dst so it
+        # is never touched. The guard aborts if the source looks wrong.
+        script = (
+            "@echo off\r\n"
+            "chcp 65001 >nul\r\n"
+            'if not exist "%s\\%s" ( exit /b 1 )\r\n'
+            ":wait\r\n"
+            'tasklist /fi "imagename eq %s" | find /i "%s" >nul '
+            "&& ( timeout /t 1 /nobreak >nul & goto wait )\r\n"
+            'robocopy "%s" "%s" /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n'
+            'start "" "%s\\%s"\r\n'
+        ) % (src, exe_name, exe_name, exe_name, src, dst, dst, exe_name)
+        with open(bat, "w", encoding="utf-8") as f:
+            f.write(script)
+        DETACHED = 0x00000008 | 0x00000200       # DETACHED | NEW_PROCESS_GROUP
+        subprocess.Popen(["cmd", "/c", bat], creationflags=DETACHED,
+                         close_fds=True)
+        return src
 
     def _on_recent_clicked(self, item):
         path = item.data(Qt.UserRole)
@@ -2913,6 +3101,14 @@ class TrainerWindow(QMainWindow):
         news_hint.setWordWrap(True)
         news_hint.setStyleSheet("color: gray;")
         dv.addWidget(news_hint)
+        autoupd_box = QCheckBox()
+        autoupd_box.setChecked(self._auto_update)
+        autoupd_box.toggled.connect(lambda on: self.set_auto_update(on))
+        dv.addWidget(autoupd_box)
+        autoupd_hint = QLabel()
+        autoupd_hint.setWordWrap(True)
+        autoupd_hint.setStyleSheet("color: gray;")
+        dv.addWidget(autoupd_hint)
         dv.addStretch(1)
 
         # -- New boxes page: default class for a freshly drawn box --
@@ -3234,6 +3430,8 @@ class TrainerWindow(QMainWindow):
             center_hint.setText(tr("center_marker_tip"))
             news_box.setText(tr("settings_news"))
             news_hint.setText(tr("settings_news_hint"))
+            autoupd_box.setText(tr("settings_autoupd"))
+            autoupd_hint.setText(tr("settings_autoupd_hint"))
             newk_title.setText(tr("settings_newbox"))
             newk_hint.setText(tr("settings_newbox_hint"))
             wand_title.setText(tr("settings_tools"))
