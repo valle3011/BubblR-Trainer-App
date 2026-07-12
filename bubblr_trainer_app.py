@@ -34,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.13"
+VERSION = "0.9.14"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -345,6 +345,11 @@ LANG = {
         "export_bg_hint": "Pages with no boxes are exported with an empty label "
                           "file (YOLO negatives). Training on background images "
                           "reduces false detections.",
+        "seg_export_toggle": "Export segmentation labels (YOLO-seg)",
+        "seg_export_hint": "Write polygon outlines instead of boxes, so you can "
+                           "train instance segmentation (task=segment). Polygon "
+                           "and lasso shapes use their outline; other shapes use "
+                           "the box (ellipses approximated).",
         "val_split_hint": "Put this share of pages into images/val + labels/val "
                           "instead of train (0 = all to train). The split is "
                           "stable per page, and data.yaml points val there.",
@@ -644,6 +649,11 @@ LANG = {
         "export_bg_hint": "Seiten ohne Boxen werden mit leerer Label-Datei "
                           "exportiert (YOLO-Negative). Training mit "
                           "Hintergrundbildern verringert Fehlerkennungen.",
+        "seg_export_toggle": "Segmentierungs-Labels exportieren (YOLO-seg)",
+        "seg_export_hint": "Schreibt Polygon-Umrisse statt Boxen, damit du "
+                           "Instanz-Segmentierung trainieren kannst "
+                           "(task=segment). Polygon/Lasso nutzen ihren Umriss, "
+                           "andere Formen die Box (Ellipsen angenähert).",
         "val_split_hint": "Diesen Anteil der Seiten nach images/val + labels/val "
                           "statt train exportieren (0 = alles nach train). Der "
                           "Split ist pro Seite stabil, und data.yaml zeigt darauf.",
@@ -696,6 +706,38 @@ def make_yolo_label(boxes, img_w, img_h, class_index=None):
         w = min(1.0, max(0.0, b["w"] / float(img_w)))
         h = min(1.0, max(0.0, b["h"] / float(img_h)))
         lines.append("%d %.6f %.6f %.6f %.6f" % (cls, cx, cy, w, h))
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def _box_polygon(b):
+    """Outline points (absolute doc coords) for a box: its stored contour when it
+    has one (poly/lasso/wand), an ellipse approximation, else the four corners."""
+    pts = b.get("points")
+    if pts and len(pts) >= 3:
+        return [(float(px), float(py)) for px, py in pts]
+    x, y, w, h = b["x"], b["y"], b["w"], b["h"]
+    if b.get("shape") == "ellipse":
+        cx, cy, rx, ry = x + w / 2.0, y + h / 2.0, w / 2.0, h / 2.0
+        n = 24
+        return [(cx + rx * math.cos(2 * math.pi * i / n),
+                 cy + ry * math.sin(2 * math.pi * i / n)) for i in range(n)]
+    return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+
+
+def make_yolo_seg_label(boxes, img_w, img_h, class_index=None):
+    """YOLO segmentation labels: one line per object as `class x1 y1 x2 y2 …`
+    with normalised polygon points (uses the drawn outline where available)."""
+    ci = class_index if class_index is not None else KIND_CLASS
+    lines = []
+    for b in boxes:
+        cls = ci.get(b.get("kind", "bubble"), 0)
+        coords = []
+        for px, py in _box_polygon(b):
+            nx = min(1.0, max(0.0, px / float(img_w)))
+            ny = min(1.0, max(0.0, py / float(img_h)))
+            coords.append("%.6f %.6f" % (nx, ny))
+        if len(coords) >= 3:
+            lines.append("%d %s" % (cls, " ".join(coords)))
     return "\n".join(lines) + "\n" if lines else ""
 
 
@@ -2117,6 +2159,7 @@ class TrainerWindow(QMainWindow):
         self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
         self._export_summary_on = bool(cfg.get("export_summary", True))
         self._export_bg = bool(cfg.get("export_bg", False))  # empty pages as negs
+        self._seg_export = bool(cfg.get("seg_export", False))  # YOLO-seg polygons
         self._news_enabled = bool(cfg.get("news_enabled", True))
         self._auto_update = bool(cfg.get("auto_update", True))  # Krita-style
         self._update_zip = None                  # path once downloaded
@@ -2374,6 +2417,7 @@ class TrainerWindow(QMainWindow):
                 "val_split": self._val_split,
                 "export_summary": self._export_summary_on,
                 "export_bg": self._export_bg,
+                "seg_export": self._seg_export,
                 "news_enabled": self._news_enabled,
                 "auto_update": self._auto_update,
                 "pending_update": self._pending_update}
@@ -3858,6 +3902,20 @@ class TrainerWindow(QMainWindow):
         bg_hint.setWordWrap(True)
         bg_hint.setStyleSheet("color: gray;")
         sv.addWidget(bg_hint)
+        sv.addSpacing(12)
+        seg_box = QCheckBox()
+        seg_box.setChecked(self._seg_export)
+
+        def on_seg(on):
+            self._seg_export = bool(on)
+            self._save_settings()
+
+        seg_box.toggled.connect(on_seg)
+        sv.addWidget(seg_box)
+        seg_hint = QLabel()
+        seg_hint.setWordWrap(True)
+        seg_hint.setStyleSheet("color: gray;")
+        sv.addWidget(seg_hint)
         sv.addStretch(1)
 
         stack.addWidget(disp)
@@ -3925,6 +3983,8 @@ class TrainerWindow(QMainWindow):
             summ_box.setText(tr("export_summary_toggle"))
             bg_box.setText(tr("export_bg_toggle"))
             bg_hint.setText(tr("export_bg_hint"))
+            seg_box.setText(tr("seg_export_toggle"))
+            seg_hint.setText(tr("seg_export_hint"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -4843,8 +4903,9 @@ class TrainerWindow(QMainWindow):
         stem = "%s_%d" % (pg["name"], int(time.time() * 1000) % 10 ** 9)
         if not pg["img"].save(os.path.join(images, stem + ".png"), "PNG"):
             raise IOError("could not write page image")
+        make_label = make_yolo_seg_label if self._seg_export else make_yolo_label
         with open(os.path.join(labels, stem + ".txt"), "w", encoding="utf-8") as fh:
-            fh.write(make_yolo_label(pg["boxes"], w, h, self._class_index_map()))
+            fh.write(make_label(pg["boxes"], w, h, self._class_index_map()))
         with open(os.path.join(order, stem + ".json"), "w", encoding="utf-8") as fh:
             json.dump(order_data(pg["boxes"], w, h, self._class_index_map()),
                       fh, indent=2)

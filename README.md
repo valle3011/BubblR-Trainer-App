@@ -228,6 +228,12 @@ what *isn't* an object and cuts down false detections. The export summary then
 reports how many negatives went out, flags any class with **no examples**, and
 warns when your classes are badly **imbalanced**.
 
+**Segmentation (YOLO-seg):** turn on *Export segmentation labels* (*Settings →
+Storage location*) to write **polygon outlines** instead of boxes, so you can
+train **instance segmentation** (`task=segment`). Polygon and lasso shapes use
+their drawn outline; rectangles/wand use the box and ellipses are approximated.
+`data.yaml` is unchanged. Leave it off for normal box detection.
+
 Classes: **bubble = 0**, **sfx = 1** by default.
 
 ## Not just manga — any object detector

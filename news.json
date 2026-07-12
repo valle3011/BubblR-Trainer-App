@@ -1,23 +1,23 @@
 {
-  "latest_version": "0.9.13",
+  "latest_version": "0.9.14",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
     {
       "date": "2026-07-12",
+      "title": "Segmentation export (YOLO-seg)",
+      "text": "Turn on 'Export segmentation labels' (Settings → Storage) to write polygon outlines instead of boxes, so you can train instance segmentation (task=segment). Polygon and lasso shapes use their outline; other shapes use the box. Pairs perfectly with the new Polygon tool.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-12",
       "title": "New Polygon tool",
-      "text": "Click to drop points connected by straight lines (no dragging) and close the shape by clicking the first point, double-clicking or pressing Enter. Backspace removes the last point, Esc cancels. Perfect for irregular SFX shapes.",
+      "text": "Click to drop points connected by straight lines (no dragging) and close by clicking the first point, double-clicking or pressing Enter. Perfect for irregular SFX shapes.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {
       "date": "2026-07-12",
-      "title": "Updates tab: automatic or manual, pick any version",
-      "text": "New Settings → Updates tab. Choose Automatic (install on next start) or Manual (an Update button appears with the new version). You can also install a specific version to roll back, and your current version is shown at the bottom.",
-      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
-    },
-    {
-      "date": "2026-07-12",
-      "title": "Seamless updates on next start",
-      "text": "Updates install themselves the next time you open BubblR Trainer — during the splash it swaps in the new build and relaunches once, with no dialog and no restart prompt (Krita-style).",
+      "title": "Updates tab & seamless auto-update",
+      "text": "Settings → Updates: choose Automatic or Manual, install a specific version to roll back, and see your current version. Updates install themselves on next start with no restart prompt.",
       "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
     },
     {
