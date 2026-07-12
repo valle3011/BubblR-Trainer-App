@@ -1,7 +1,13 @@
 {
-  "latest_version": "0.9.9",
+  "latest_version": "0.9.10",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-12",
+      "title": "Background images & smarter export summary",
+      "text": "Turn on \"Export empty pages as background images\" (Settings → Storage) to export pages with no boxes as YOLO negatives — this reduces false detections. The export summary now counts negatives, warns about classes with no examples and flags badly imbalanced classes.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-12",
       "title": "Automatic updates",
@@ -18,11 +24,6 @@
       "date": "2026-07-12",
       "title": "Custom classes & YOLO export",
       "text": "Define your own detection classes (Settings → Classes), import them from a classes.txt / data.yaml, and export classes.txt + data.yaml with an optional train/val split — train any object detector, not just manga bubbles."
-    },
-    {
-      "date": "2026-07-12",
-      "title": "Krita-style start page & drag-and-drop",
-      "text": "Recent-images grid, dockable Tools / Boxes / Pages panels, and drag images, a folder or a project onto the window to load them."
     }
   ]
 }

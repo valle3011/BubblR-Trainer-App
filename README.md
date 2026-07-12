@@ -210,6 +210,13 @@ that share of pages goes to `images/val` + `labels/val` instead of `train`, the
 split is **stable per page** (so a page never lands in both across exports), and
 `data.yaml`'s `val:` points at it. 0 % keeps everything in `train`.
 
+**Background / negative images:** turn on *Export empty pages as background
+images* (*Settings → Storage location*) to also export pages that have **no
+boxes**, each with an empty label file. Training on backgrounds teaches the model
+what *isn't* an object and cuts down false detections. The export summary then
+reports how many negatives went out, flags any class with **no examples**, and
+warns when your classes are badly **imbalanced**.
+
 Classes: **bubble = 0**, **sfx = 1** by default.
 
 ## Not just manga — any object detector

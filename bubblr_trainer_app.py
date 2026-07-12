@@ -34,7 +34,7 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-VERSION = "0.9.9"
+VERSION = "0.9.10"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -309,6 +309,10 @@ LANG = {
         "settings_folder_title": "Dataset / export folder",
         "val_split": "Validation split:",
         "export_summary_toggle": "Show the summary dialog after Export all",
+        "export_bg_toggle": "Export empty pages as background images",
+        "export_bg_hint": "Pages with no boxes are exported with an empty label "
+                          "file (YOLO negatives). Training on background images "
+                          "reduces false detections.",
         "val_split_hint": "Put this share of pages into images/val + labels/val "
                           "instead of train (0 = all to train). The split is "
                           "stable per page, and data.yaml points val there.",
@@ -332,8 +336,13 @@ LANG = {
         "exported_all": "Exported {n} page(s) to the dataset folder.",
         "summary_title": "Export summary",
         "summary_pages": "Exported {n} page(s)  —  {tr} train, {va} val.",
+        "summary_bg": "Of these, {n} background image(s) (no objects).",
         "summary_objects": "Objects per class:",
         "summary_total": "Total: {n} box(es).",
+        "summary_empty_cls": "⚠ No examples for: {cls}. That class won't be "
+                             "learned until you label some.",
+        "summary_imbalance": "⚠ Classes are imbalanced (10×+). Consider adding "
+                             "examples for the rarer ones.",
         "export_fail": "Export failed: {msg}",
         "saved": "Project saved.", "loaded_proj": "Project loaded ({n} page(s)).",
         "load_fail": "Could not load: {msg}",
@@ -570,6 +579,10 @@ LANG = {
         "settings_folder_title": "Dataset-/Export-Ordner",
         "val_split": "Validierungs-Anteil:",
         "export_summary_toggle": "Zusammenfassungs-Dialog nach „Export all“ zeigen",
+        "export_bg_toggle": "Leere Seiten als Hintergrundbilder exportieren",
+        "export_bg_hint": "Seiten ohne Boxen werden mit leerer Label-Datei "
+                          "exportiert (YOLO-Negative). Training mit "
+                          "Hintergrundbildern verringert Fehlerkennungen.",
         "val_split_hint": "Diesen Anteil der Seiten nach images/val + labels/val "
                           "statt train exportieren (0 = alles nach train). Der "
                           "Split ist pro Seite stabil, und data.yaml zeigt darauf.",
@@ -595,8 +608,13 @@ LANG = {
         "exported_all": "{n} Seite(n) in den Datensatz-Ordner exportiert.",
         "summary_title": "Export-Zusammenfassung",
         "summary_pages": "{n} Seite(n) exportiert  —  {tr} train, {va} val.",
+        "summary_bg": "Davon {n} Hintergrundbild(er) (ohne Objekte).",
         "summary_objects": "Objekte pro Klasse:",
         "summary_total": "Gesamt: {n} Box(en).",
+        "summary_empty_cls": "⚠ Keine Beispiele für: {cls}. Diese Klasse wird "
+                             "erst gelernt, wenn du sie labelst.",
+        "summary_imbalance": "⚠ Klassen sind unausgewogen (10×+). Füge für die "
+                             "selteneren mehr Beispiele hinzu.",
         "export_fail": "Export fehlgeschlagen: {msg}",
         "saved": "Projekt gespeichert.", "loaded_proj": "Projekt geladen ({n} Seite(n)).",
         "load_fail": "Konnte nicht laden: {msg}",
@@ -1813,6 +1831,7 @@ class TrainerWindow(QMainWindow):
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
         self._export_summary_on = bool(cfg.get("export_summary", True))
+        self._export_bg = bool(cfg.get("export_bg", False))  # empty pages as negs
         self._news_enabled = bool(cfg.get("news_enabled", True))
         self._auto_update = bool(cfg.get("auto_update", True))  # Krita-style
         self._update_zip = None                  # path once downloaded
@@ -2067,6 +2086,7 @@ class TrainerWindow(QMainWindow):
                 "recent": self._recent[:40], "classes": self._classes,
                 "val_split": self._val_split,
                 "export_summary": self._export_summary_on,
+                "export_bg": self._export_bg,
                 "news_enabled": self._news_enabled,
                 "auto_update": self._auto_update}
         try:
@@ -3393,6 +3413,20 @@ class TrainerWindow(QMainWindow):
 
         summ_box.toggled.connect(on_summ)
         sv.addWidget(summ_box)
+        sv.addSpacing(12)
+        bg_box = QCheckBox()
+        bg_box.setChecked(self._export_bg)
+
+        def on_bg(on):
+            self._export_bg = bool(on)
+            self._save_settings()
+
+        bg_box.toggled.connect(on_bg)
+        sv.addWidget(bg_box)
+        bg_hint = QLabel()
+        bg_hint.setWordWrap(True)
+        bg_hint.setStyleSheet("color: gray;")
+        sv.addWidget(bg_hint)
         sv.addStretch(1)
 
         stack.addWidget(disp)
@@ -3449,6 +3483,8 @@ class TrainerWindow(QMainWindow):
             val_lbl.setText(tr("val_split"))
             val_hint.setText(tr("val_split_hint"))
             summ_box.setText(tr("export_summary_toggle"))
+            bg_box.setText(tr("export_bg_toggle"))
+            bg_hint.setText(tr("export_bg_hint"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -4419,7 +4455,10 @@ class TrainerWindow(QMainWindow):
 
     def on_export(self, all_pages):
         pages = self._pages if all_pages else ([self._page()] if self._page() else [])
-        pages = [p for p in pages if p and p["boxes"]]
+        # Keep labelled pages; optionally add empty pages as background/negatives
+        # (exported with an empty label file — good for reducing false positives).
+        pages = [p for p in pages
+                 if p and (p["boxes"] or self._export_bg)]
         if not self._pages:
             self._status(self._tr("no_page"), error=True)
             return
@@ -4468,23 +4507,38 @@ class TrainerWindow(QMainWindow):
         """A short recap after an 'export all': pages, train/val split and how
         many objects of each class went out."""
         counts = {c["key"]: 0 for c in self._classes}
-        train = val = 0
+        train = val = bg = 0
         for pg in pages:
             if self._val_split > 0 and self._page_bucket(pg) < self._val_split:
                 val += 1
             else:
                 train += 1
+            if not pg["boxes"]:
+                bg += 1
             for b in pg["boxes"]:
                 k = b.get("kind", "bubble")
                 counts[k] = counts.get(k, 0) + 1
         total = sum(counts.values())
         t = self._tr
         lines = [t("summary_pages").format(n=len(pages), tr=train, va=val), ""]
+        if bg:
+            lines.append(t("summary_bg").format(n=bg))
+            lines.append("")
         lines.append(t("summary_objects"))
         for c in self._classes:
             lines.append("   %s: %d" % (c["label"], counts.get(c["key"], 0)))
-        lines += ["", t("summary_total").format(n=total),
-                  "", "%s" % os.path.abspath(self._folder)]
+        lines += ["", t("summary_total").format(n=total)]
+        # Gentle class-imbalance / empty-class heads-up.
+        nonzero = [counts[c["key"]] for c in self._classes if counts[c["key"]] > 0]
+        empty = [c["label"] for c in self._classes if counts.get(c["key"], 0) == 0]
+        warn = []
+        if empty:
+            warn.append(t("summary_empty_cls").format(cls=", ".join(empty)))
+        if len(nonzero) > 1 and max(nonzero) >= 10 * min(nonzero):
+            warn.append(t("summary_imbalance"))
+        if warn:
+            lines += [""] + warn
+        lines += ["", "%s" % os.path.abspath(self._folder)]
         QMessageBox.information(self, t("summary_title"), "\n".join(lines))
 
     def on_save_project(self):
@@ -4522,7 +4576,8 @@ class TrainerWindow(QMainWindow):
             for b in pd.get("boxes", []):
                 nb = {"x": int(b["x"]), "y": int(b["y"]),
                       "w": int(b["w"]), "h": int(b["h"]),
-                      "kind": "sfx" if b.get("kind") == "sfx" else "bubble",
+                      # keep any class key (custom classes), not just bubble/sfx
+                      "kind": str(b.get("kind") or "bubble"),
                       "order": int(b.get("order", 0) or 0),
                       "shape": b.get("shape", "rect")}
                 if isinstance(b.get("points"), list):
