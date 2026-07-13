@@ -36,7 +36,7 @@ from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer
                           QSize, QProcess, QItemSelectionModel, QThread)
 
 from bubblr_train_core import (MODEL_URL, model_path, build_detect_script,
-                               detect_config)
+                               detect_config, build_rank_script, rank_config)
 
 
 class AiModelFetcher(QThread):
@@ -65,7 +65,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.18"
+VERSION = "0.9.19"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -265,6 +265,9 @@ LANG = {
         "rank_top_q": "How many top pages to load?",
         "rank_running": "Ranking… (loads the model first, can take a while)",
         "rank_fail": "Ranking failed — see the AI tool for details.",
+        "rank_need_model_title": "No ranking model",
+        "rank_need_model": "No AI model is set for ranking. Download the shared "
+                           "model now? (Or pick one under Settings → Experimental.)",
         "rank_empty": "No ranked pages were produced.",
         "rank_loaded": "Loaded the top {n} ranked page(s).",
         "m_file": "File", "m_edit": "Edit", "m_page": "Page",
@@ -404,6 +407,16 @@ LANG = {
         "exp_trainer_hint": "Adds a Tools → Train a model… entry that opens the "
                             "companion training app. Off by default while the "
                             "Model Trainer is experimental.",
+        "exp_ai_title": "AI model (ranking & detection)",
+        "exp_rank_model": "Ranking model:",
+        "exp_rank_download": "Download",
+        "exp_rank_hint": "The .pt used to rank pages (File → Rank && load) and to "
+                         "AI-detect boxes. Leave empty to use the downloaded "
+                         "shared model. Pick your own to use this for other kinds "
+                         "of images.",
+        "exp_ai_python": "AI Python:",
+        "exp_ai_python_hint": "A python.exe that has Ultralytics installed. Leave "
+                              "empty to auto-detect the BubblR AI .venv.",
         "update_mode_auto": "Automatic",
         "update_mode_manual": "Manual",
         "update_mode_hint": "Automatic: a newer version is downloaded in the "
@@ -647,6 +660,10 @@ LANG = {
         "rank_top_q": "Wie viele Top-Seiten laden?",
         "rank_running": "Ranking läuft… (lädt zuerst das Modell, dauert etwas)",
         "rank_fail": "Ranking fehlgeschlagen — Details im AI-Tool.",
+        "rank_need_model_title": "Kein Ranking-Modell",
+        "rank_need_model": "Es ist kein KI-Modell fürs Ranking gesetzt. Jetzt das "
+                           "geteilte Modell laden? (Oder unter Einstellungen → "
+                           "Experimentell eins wählen.)",
         "rank_empty": "Es wurden keine gerankten Seiten erzeugt.",
         "rank_loaded": "Top {n} gerankte Seite(n) geladen.",
         "m_file": "Datei", "m_edit": "Bearbeiten", "m_page": "Seite",
@@ -795,6 +812,16 @@ LANG = {
                             "hinzu, der die begleitende Trainings-App öffnet. "
                             "Standardmäßig aus, solange der Model Trainer "
                             "experimentell ist.",
+        "exp_ai_title": "KI-Modell (Ranking & Erkennung)",
+        "exp_rank_model": "Ranking-Modell:",
+        "exp_rank_download": "Laden",
+        "exp_rank_hint": "Das .pt zum Ranken der Seiten (Datei → Rank && load) und "
+                         "für die KI-Box-Erkennung. Leer lassen = geteiltes "
+                         "geladenes Modell. Ein eigenes wählen, um das Programm "
+                         "für andere Bildarten zu nutzen.",
+        "exp_ai_python": "KI-Python:",
+        "exp_ai_python_hint": "Eine python.exe mit installiertem Ultralytics. Leer "
+                              "lassen = BubblR-AI-.venv automatisch finden.",
         "update_mode_auto": "Automatisch",
         "update_mode_manual": "Manuell",
         "update_mode_hint": "Automatisch: eine neuere Version wird im Hintergrund "
@@ -2359,6 +2386,8 @@ class TrainerWindow(QMainWindow):
         self._last_dir = cfg.get("last_dir", "")  # last place a dialog was used
         self._recent = [p for p in cfg.get("recent", []) if isinstance(p, str)]
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
+        self._ai_python_path = cfg.get("ai_python", "")   # python w/ ultralytics
+        self._rank_model_path = cfg.get("rank_model", "")  # model used for ranking
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
@@ -2614,7 +2643,8 @@ class TrainerWindow(QMainWindow):
 
     def _save_settings(self):
         data = {"lang": self._lang, "folder": self._folder,
-                "ai_dir": self._ai_dir, "locked": self._locked,
+                "ai_dir": self._ai_dir, "ai_python": self._ai_python_path,
+                "rank_model": self._rank_model_path, "locked": self._locked,
                 "wand_tol": self._wand_tol, "auto_order_on": self._auto_order,
                 "rtl": self._rtl, "new_kind": self._new_kind,
                 "center_marker": self._center, "last_dir": self._last_dir,
@@ -4336,6 +4366,74 @@ class TrainerWindow(QMainWindow):
         exp_trainer_hint.setWordWrap(True)
         exp_trainer_hint.setStyleSheet("color: gray;")
         xv.addWidget(exp_trainer_hint)
+        xv.addSpacing(14)
+        # -- AI model used for ranking / detection --
+        exp_ai_title = QLabel()
+        exp_ai_title.setStyleSheet("font-weight: bold;")
+        xv.addWidget(exp_ai_title)
+        rmrow = QHBoxLayout()
+        rank_lbl = QLabel()
+        rank_model_edit = QLineEdit(self._rank_model_path)
+        rank_model_edit.setPlaceholderText(
+            "empty = use the downloaded shared model")
+
+        def on_rank_model():
+            self._rank_model_path = rank_model_edit.text().strip()
+            self._save_settings()
+
+        rank_model_edit.editingFinished.connect(on_rank_model)
+        rank_browse = QPushButton(self._tr("mi_folder"))
+
+        def pick_rank_model():
+            p, _ = QFileDialog.getOpenFileName(
+                self, self._tr("exp_rank_model"), self._start_dir(),
+                "PyTorch weights (*.pt)")
+            if p:
+                rank_model_edit.setText(p)
+                on_rank_model()
+
+        rank_browse.clicked.connect(pick_rank_model)
+        rank_dl = QPushButton(self._tr("exp_rank_download"))
+        rank_dl.clicked.connect(self._download_ai_model)
+        rmrow.addWidget(rank_lbl)
+        rmrow.addWidget(rank_model_edit, 1)
+        rmrow.addWidget(rank_browse)
+        rmrow.addWidget(rank_dl)
+        xv.addLayout(rmrow)
+        rank_hint = QLabel()
+        rank_hint.setWordWrap(True)
+        rank_hint.setStyleSheet("color: gray;")
+        xv.addWidget(rank_hint)
+        xv.addSpacing(8)
+        aprow = QHBoxLayout()
+        aipy_lbl = QLabel()
+        aipy_edit = QLineEdit(self._ai_python_path)
+        aipy_edit.setPlaceholderText("empty = auto-detect the BubblR AI .venv")
+
+        def on_aipy():
+            self._ai_python_path = aipy_edit.text().strip()
+            self._save_settings()
+
+        aipy_edit.editingFinished.connect(on_aipy)
+        aipy_browse = QPushButton(self._tr("mi_folder"))
+
+        def pick_aipy():
+            p, _ = QFileDialog.getOpenFileName(
+                self, self._tr("exp_ai_python"), self._start_dir(),
+                "Python (python*.exe python*)")
+            if p:
+                aipy_edit.setText(p)
+                on_aipy()
+
+        aipy_browse.clicked.connect(pick_aipy)
+        aprow.addWidget(aipy_lbl)
+        aprow.addWidget(aipy_edit, 1)
+        aprow.addWidget(aipy_browse)
+        xv.addLayout(aprow)
+        aipy_hint = QLabel()
+        aipy_hint.setWordWrap(True)
+        aipy_hint.setStyleSheet("color: gray;")
+        xv.addWidget(aipy_hint)
         xv.addStretch(1)
 
         stack.addWidget(disp)
@@ -4413,6 +4511,11 @@ class TrainerWindow(QMainWindow):
             exp_intro.setText(tr("exp_intro"))
             exp_trainer_box.setText(tr("exp_trainer_toggle"))
             exp_trainer_hint.setText(tr("exp_trainer_hint"))
+            exp_ai_title.setText(tr("exp_ai_title"))
+            rank_lbl.setText(tr("exp_rank_model"))
+            rank_hint.setText(tr("exp_rank_hint"))
+            aipy_lbl.setText(tr("exp_ai_python"))
+            aipy_hint.setText(tr("exp_ai_python_hint"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -5208,58 +5311,129 @@ class TrainerWindow(QMainWindow):
                 return p
         return ""
 
+    def _ultra_python(self):
+        """A Python that has Ultralytics: the setting, else a .venv in the AI
+        folder or the sibling BubblR-Test/ai. '' if none found."""
+        p = self._ai_python_path
+        if p and os.path.isfile(p):
+            return p
+        cands = [self._ai_dir]
+        base = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
+                else os.path.dirname(os.path.abspath(__file__)))
+        cands.append(os.path.normpath(
+            os.path.join(base, "..", "BubblR-Test", "ai")))
+        for d in cands:
+            if d:
+                v = self._ai_python(d)
+                if v:
+                    return v
+        return ""
+
+    def _rank_model(self):
+        """The model used for ranking: the chosen one, else the downloaded shared
+        model. '' if neither is available."""
+        m = self._rank_model_path
+        if m and os.path.isfile(m):
+            return m
+        return model_path() if os.path.isfile(model_path()) else ""
+
     def on_rank_load(self):
-        """Rank a folder of raw pages with the AI tool, then load the top ones."""
+        """Rank a folder of raw pages by how much the AI model detects, then load
+        the top ones. Uses the chosen/downloaded model in-program; falls back to
+        the external BubblR AI tool (propose.py) if no model is set up."""
         folder = QFileDialog.getExistingDirectory(
             self, self._tr("rank_pick"), self._start_dir())
         if not folder:
             return
         self._remember_dir(folder)
-        ai = self._find_ai_dir()
-        if not ai:
-            if QMessageBox.question(
-                    self, self._tr("rank_no_ai_title"), self._tr("rank_no_ai"),
-                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
-                return
-            d = QFileDialog.getExistingDirectory(
-                self, self._tr("rank_pick_ai"), self._start_dir())
-            if not d or not os.path.isfile(os.path.join(d, "propose.py")):
-                self._status(self._tr("rank_no_ai"), error=True)
-                return
-            ai = self._ai_dir = d
-            self._save_settings()
-        py = self._ai_python(ai)
-        if not py:
-            self._status(self._tr("rank_no_venv"), error=True)
-            return
         if getattr(self, "_ranking", False):     # a rank job is already running
             return
-        top, ok = QInputDialog.getInt(
-            self, self._tr("rank_top_title"), self._tr("rank_top_q"), 30, 1, 500)
-        if not ok:
+        py = self._ultra_python()
+        model = self._rank_model()
+        # preferred: in-program ranking with a YOLO model
+        if py and model:
+            top, ok = QInputDialog.getInt(
+                self, self._tr("rank_top_title"), self._tr("rank_top_q"),
+                30, 1, 2000)
+            if not ok:
+                return
+            cfg = rank_config(model, folder)
+            d = tempfile.mkdtemp(prefix="bubblr_rank_")
+            sp = os.path.join(d, "rank.py")
+            cp = os.path.join(d, "cfg.json")
+            with open(sp, "w", encoding="utf-8") as f:
+                f.write(build_rank_script(cfg))
+            with open(cp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f)
+            self._rank_top = top
+            self._rank_out = []
+            self._rank_mode = "model"
+            self._ranking = True
+            self._status(self._tr("rank_running"))
+            self._rank_proc = QProcess(self)
+            self._rank_proc.setProcessChannelMode(QProcess.MergedChannels)
+            self._rank_proc.readyReadStandardOutput.connect(self._rank_output)
+            self._rank_proc.finished.connect(self._rank_finished)
+            self._rank_proc.start(py, ["-u", sp, cp])
             return
-        self._rank_folder = folder
-        self._ranking = True
-        self._status(self._tr("rank_running"))
-        self._rank_proc = QProcess(self)
-        self._rank_proc.setWorkingDirectory(ai)
-        self._rank_proc.setProcessChannelMode(QProcess.MergedChannels)
-        self._rank_proc.readyReadStandardOutput.connect(self._rank_output)
-        self._rank_proc.finished.connect(self._rank_finished)
-        self._rank_proc.start(py, ["-u", os.path.join(ai, "propose.py"),
-                                   "--dir", folder, "--top", str(top)])
+        # fallback: the external propose.py tool
+        ai = self._find_ai_dir()
+        aipy = self._ai_python(ai) if ai else ""
+        if ai and aipy:
+            top, ok = QInputDialog.getInt(
+                self, self._tr("rank_top_title"), self._tr("rank_top_q"),
+                30, 1, 2000)
+            if not ok:
+                return
+            self._rank_folder = folder
+            self._rank_mode = "propose"
+            self._ranking = True
+            self._status(self._tr("rank_running"))
+            self._rank_proc = QProcess(self)
+            self._rank_proc.setWorkingDirectory(ai)
+            self._rank_proc.setProcessChannelMode(QProcess.MergedChannels)
+            self._rank_proc.readyReadStandardOutput.connect(self._rank_output)
+            self._rank_proc.finished.connect(self._rank_finished)
+            self._rank_proc.start(aipy, ["-u", os.path.join(ai, "propose.py"),
+                                         "--dir", folder, "--top", str(top)])
+            return
+        # nothing available: guide the user
+        if py and QMessageBox.question(
+                self, self._tr("rank_need_model_title"),
+                self._tr("rank_need_model"),
+                QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+            self._download_ai_model()
+        elif not py:
+            self._status(self._tr("rank_no_venv"), error=True)
 
     def _rank_output(self):
-        txt = bytes(self._rank_proc.readAllStandardOutput()).decode(
-            "utf-8", "replace").strip().splitlines()
-        if txt:
-            self._status(self._tr("rank_running") + "  " + txt[-1][:80])
+        data = bytes(self._rank_proc.readAllStandardOutput()).decode(
+            "utf-8", "replace")
+        for line in data.splitlines():
+            if line.startswith("BUBBLR_RANK"):
+                try:
+                    self._rank_out = json.loads(line.split(" ", 1)[1])
+                except Exception:                # noqa: BLE001
+                    self._rank_out = []
+            elif line.strip():
+                self._status(self._tr("rank_running") + "  " + line.strip()[:80])
 
     def _rank_finished(self, code, _status):
         self._ranking = False
         if code != 0:
             self._status(self._tr("rank_fail"), error=True)
             return
+        if getattr(self, "_rank_mode", "") == "model":
+            ranked = getattr(self, "_rank_out", []) or []
+            paths = [row[0] for row in ranked[:getattr(self, "_rank_top", 30)]
+                     if row and os.path.isfile(row[0])]
+            if not paths:
+                self._status(self._tr("rank_empty"), error=True)
+                return
+            n = self.add_image_paths(paths)
+            self._status(self._tr("rank_loaded").format(n=n))
+            return
+        # propose.py mode: read its _label_first folder
         out = os.path.join(self._rank_folder, "_label_first")
         try:
             files = sorted(f for f in os.listdir(out)

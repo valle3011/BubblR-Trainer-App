@@ -80,6 +80,46 @@ def val_config(model, data, imgsz=640, device=""):
             "device": device or ""}
 
 
+def build_rank_script(cfg):
+    """Rank every image in a folder by how much the model detects (sum of
+    detection confidences), best first. Prints a 'BUBBLR_RANK' line with a JSON
+    list of [path, score, count]. Used to pick which raw pages to label first."""
+    return (
+        "import json, os, sys, multiprocessing\n"
+        "from ultralytics import YOLO\n"
+        "\n"
+        "def _run():\n"
+        "    c = json.load(open(sys.argv[1], encoding='utf-8'))\n"
+        "    exts = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')\n"
+        "    imgs = [os.path.join(c['dir'], f)\n"
+        "            for f in sorted(os.listdir(c['dir']))\n"
+        "            if f.lower().endswith(exts)]\n"
+        "    m = YOLO(c['model'])\n"
+        "    scored = []\n"
+        "    for i in range(0, len(imgs), 16):\n"
+        "        batch = imgs[i:i + 16]\n"
+        "        res = m.predict(source=batch, imgsz=c['imgsz'], conf=c['conf'],\n"
+        "                        save=False, verbose=False)\n"
+        "        for img, r in zip(batch, res):\n"
+        "            b = r.boxes\n"
+        "            n = int(len(b)) if b is not None else 0\n"
+        "            s = float(b.conf.sum()) if n else 0.0\n"
+        "            scored.append([img, s, n])\n"
+        "        print('scanned %d/%d' % (min(i + 16, len(imgs)), len(imgs)),\n"
+        "              flush=True)\n"
+        "    scored.sort(key=lambda t: t[1], reverse=True)\n"
+        "    print('BUBBLR_RANK', json.dumps(scored))\n"
+        "\n"
+        "if __name__ == '__main__':\n"
+        "    multiprocessing.freeze_support()\n"
+        "    _run()\n")
+
+
+def rank_config(model, folder, imgsz=640, conf=0.25):
+    return {"model": model, "dir": folder, "imgsz": int(imgsz),
+            "conf": float(conf)}
+
+
 def read_yaml_summary(path):
     """Small reader for a BubblR/YOLO data.yaml: returns (nc, [names])."""
     names, nc = [], None

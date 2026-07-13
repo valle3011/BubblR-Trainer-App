@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.18",
+  "latest_version": "0.9.19",
   "model_trainer_version": "0.4.0",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-13",
+      "title": "In-app AI ranking + choose the ranking model",
+      "text": "File → Rank && load now ranks pages with the downloaded AI model right inside BubblR Trainer (no external tool needed) — pages with the most detections load first. Under Settings → Experimental you can choose which model (and Python env) to use, so the program works for other kinds of images too.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-12",
       "title": "Shared AI model: pull from git & pre-label",
