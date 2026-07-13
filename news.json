@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.19",
+  "latest_version": "0.9.20",
   "model_trainer_version": "0.4.0",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-13",
+      "title": "Green button for new AI models",
+      "text": "The start page now shows a green ‘Get new AI model’ button when a newer model is published to the BubblR-Model repo — just like the app-update button. It appears when the experimental AI features are on. Click it to download the latest model for ranking and AI-detect.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-13",
       "title": "In-app AI ranking + choose the ranking model",

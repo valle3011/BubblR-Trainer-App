@@ -35,8 +35,9 @@ from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
                           QSize, QProcess, QItemSelectionModel, QThread)
 
-from bubblr_train_core import (MODEL_URL, model_path, build_detect_script,
-                               detect_config, build_rank_script, rank_config)
+from bubblr_train_core import (MODEL_URL, MODEL_META_URL, model_path,
+                               build_detect_script, detect_config,
+                               build_rank_script, rank_config)
 
 
 class AiModelFetcher(QThread):
@@ -65,7 +66,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.19"
+VERSION = "0.9.20"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -275,6 +276,7 @@ LANG = {
         "mi_get_model": "Download latest AI model",
         "mi_ai_detect": "AI-detect boxes on this page",
         "ai_downloading": "Downloading the latest AI model…",
+        "model_update_btn": "⬆ Get new AI model (v{v})",
         "ai_model_ready": "AI model downloaded — use 'AI-detect boxes on this page'.",
         "ai_model_none": "No model available yet (none published, or offline).",
         "ai_need_model": "No AI model downloaded yet. Download the latest one now?",
@@ -671,6 +673,7 @@ LANG = {
         "mi_get_model": "Neuestes KI-Modell laden",
         "mi_ai_detect": "KI-Boxen auf dieser Seite erkennen",
         "ai_downloading": "Neuestes KI-Modell wird geladen…",
+        "model_update_btn": "⬆ Neues KI-Modell laden (v{v})",
         "ai_model_ready": "KI-Modell geladen — nutze „KI-Boxen auf dieser Seite "
                           "erkennen“.",
         "ai_model_none": "Noch kein Modell verfügbar (nichts veröffentlicht oder "
@@ -2216,6 +2219,24 @@ class NewsFetcher(QThread):
         self.loaded.emit(data)
 
 
+class ModelMetaFetcher(QThread):
+    """Fetch the BubblR-Model repo's model.json in the background; emits the
+    parsed dict (with the published model 'version'), or None on failure."""
+    loaded = pyqtSignal(object)
+
+    def run(self):
+        data = None
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                MODEL_META_URL, headers={"User-Agent": "BubblR-Trainer"})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except Exception:                        # noqa: BLE001 (offline etc.)
+            data = None
+        self.loaded.emit(data)
+
+
 class UpdateDownloader(QThread):
     """Download the latest-release zip in the background (Krita-style: fetched
     automatically as soon as an update is detected). Emits the saved file path
@@ -2388,6 +2409,8 @@ class TrainerWindow(QMainWindow):
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
         self._ai_python_path = cfg.get("ai_python", "")   # python w/ ultralytics
         self._rank_model_path = cfg.get("rank_model", "")  # model used for ranking
+        self._ai_model_version = int(cfg.get("ai_model_version", 0))  # downloaded
+        self._latest_model_version = 0            # newest in the BubblR-Model repo
         self._locked = cfg.get("locked", False)  # movable by default (Krita-style)
         self._wand_tol = int(cfg.get("wand_tol", 40))  # set in the Settings window
         self._val_split = max(0, min(50, int(cfg.get("val_split", 0))))  # % to val
@@ -2628,6 +2651,7 @@ class TrainerWindow(QMainWindow):
         self._refresh()
         self._start_discord()                # show "in BubblR Trainer" if enabled
         self._start_news()                   # fetch news / check for updates
+        self._start_model_check()            # green button if a newer AI model exists
 
     # -- settings / i18n --
     def _tr(self, key):
@@ -2644,7 +2668,8 @@ class TrainerWindow(QMainWindow):
     def _save_settings(self):
         data = {"lang": self._lang, "folder": self._folder,
                 "ai_dir": self._ai_dir, "ai_python": self._ai_python_path,
-                "rank_model": self._rank_model_path, "locked": self._locked,
+                "rank_model": self._rank_model_path,
+                "ai_model_version": self._ai_model_version, "locked": self._locked,
                 "wand_tol": self._wand_tol, "auto_order_on": self._auto_order,
                 "rtl": self._rtl, "new_kind": self._new_kind,
                 "center_marker": self._center, "last_dir": self._last_dir,
@@ -3028,6 +3053,14 @@ class TrainerWindow(QMainWindow):
         self.news_install_btn.clicked.connect(self._install_update)
         self.news_install_btn.setVisible(False)
         news_col.addWidget(self.news_install_btn)
+        # green "new AI model" button (like the app-update button)
+        self.model_update_btn = QPushButton()
+        self.model_update_btn.setStyleSheet(
+            "background:#2f6f3f;color:#eaffea;font-weight:bold;"
+            "border:none;border-radius:5px;padding:8px;")
+        self.model_update_btn.clicked.connect(self._get_ai_model_from_start)
+        self.model_update_btn.setVisible(False)
+        news_col.addWidget(self.model_update_btn)
         self.news_view = QTextBrowser()
         self.news_view.setOpenExternalLinks(True)
         self.news_view.setFrameShape(QFrame.NoFrame)
@@ -3101,6 +3134,40 @@ class TrainerWindow(QMainWindow):
         self._news_enabled = bool(on)
         self._save_settings()
         self._start_news()
+
+    # -- new-AI-model check (green button on the start page) -------------------
+    def _start_model_check(self):
+        """Check the BubblR-Model repo for a newer published model version."""
+        if not hasattr(self, "model_update_btn"):
+            return
+        self._model_thread = ModelMetaFetcher(self)
+        self._model_thread.loaded.connect(self._on_model_meta)
+        self._model_thread.start()
+
+    def _on_model_meta(self, data):
+        try:
+            self._latest_model_version = int((data or {}).get("version", 0))
+        except (TypeError, ValueError):
+            self._latest_model_version = 0
+        self._refresh_model_banner()
+
+    def _refresh_model_banner(self):
+        """Show the green 'new AI model' button only when the experimental AI
+        features are on and the repo has a newer model than we downloaded."""
+        if not hasattr(self, "model_update_btn"):
+            return
+        newer = self._latest_model_version > self._ai_model_version
+        show = bool(self._experimental_trainer and newer
+                    and self._latest_model_version > 0)
+        if show:
+            self.model_update_btn.setText(
+                self._tr("model_update_btn").format(v=self._latest_model_version))
+        self.model_update_btn.setVisible(show)
+
+    def _get_ai_model_from_start(self):
+        self.model_update_btn.setEnabled(False)
+        self.model_update_btn.setText(self._tr("ai_downloading"))
+        self._download_ai_model()
 
     def set_auto_update(self, on):
         self._auto_update = bool(on)
@@ -3716,6 +3783,7 @@ class TrainerWindow(QMainWindow):
         menu = getattr(self, "_tools_menu", None)
         if menu is not None:
             menu.menuAction().setVisible(bool(self._experimental_trainer))
+        self._refresh_model_banner()             # the AI-model button is gated too
 
     def _launch_model_trainer(self):
         """Open the companion BubblR Model Trainer (YOLO training GUI). Looks for
@@ -3761,9 +3829,17 @@ class TrainerWindow(QMainWindow):
 
     def _on_ai_model_downloaded(self, path):
         self._aimodel_thread = None
+        if hasattr(self, "model_update_btn"):
+            self.model_update_btn.setEnabled(True)
         if path:
+            # remember which model version we now have, and drop the banner
+            if self._latest_model_version:
+                self._ai_model_version = self._latest_model_version
+                self._save_settings()
+            self._refresh_model_banner()
             self._status(self._tr("ai_model_ready"))
         else:
+            self._refresh_model_banner()
             self._status(self._tr("ai_model_none"), error=True)
 
     def _ai_detect_page(self):
