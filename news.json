@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.23",
+  "latest_version": "0.9.24",
   "model_trainer_version": "0.4.0",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-13",
+      "title": "Ranking skips pages you already labelled",
+      "text": "Rank && load no longer surfaces pages that are already in your dataset (exported). It matches them by image content (a hash that survives JPG/PNG re-encoding), so re-ranking a chapter only shows the pages you still need to do.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-13",
       "title": "Ranking now scans subfolders",

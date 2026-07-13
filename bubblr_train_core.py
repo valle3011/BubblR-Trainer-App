@@ -81,23 +81,59 @@ def val_config(model, data, imgsz=640, device=""):
 
 
 def build_rank_script(cfg):
-    """Rank every image in a folder by how much the model detects (sum of
-    detection confidences), best first. Prints a 'BUBBLR_RANK' line with a JSON
-    list of [path, score, count]. Used to pick which raw pages to label first."""
+    """Rank every image in a folder (recursively) by how much the model detects
+    (sum of detection confidences), best first. Pages already labelled — i.e.
+    whose pixels are already exported into the dataset — are dropped, matched by
+    a 16x16 average hash (robust to JPG/PNG re-encoding). Prints a 'BUBBLR_RANK'
+    line with a JSON list of [path, score, count]."""
     return (
         "import json, os, sys, multiprocessing\n"
         "from ultralytics import YOLO\n"
+        "from PIL import Image\n"
+        "\n"
+        "EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')\n"
+        "\n"
+        "def _ahash(path):\n"
+        "    try:\n"
+        "        with Image.open(path) as im:\n"
+        "            g = im.convert('L').resize((16, 16))\n"
+        "        px = list(g.getdata())\n"
+        "        avg = (sum(px) / len(px)) if px else 0\n"
+        "        bits = 0\n"
+        "        for i, v in enumerate(px):\n"
+        "            if v > avg:\n"
+        "                bits |= 1 << i\n"
+        "        return '%064x' % bits\n"
+        "    except Exception:\n"
+        "        return None\n"
+        "\n"
+        "def _labeled(store):\n"
+        "    out = set()\n"
+        "    for sub in ('train', 'val'):\n"
+        "        d = os.path.join(store, 'images', sub)\n"
+        "        if os.path.isdir(d):\n"
+        "            for f in os.listdir(d):\n"
+        "                if f.lower().endswith(EXTS):\n"
+        "                    h = _ahash(os.path.join(d, f))\n"
+        "                    if h:\n"
+        "                        out.add(h)\n"
+        "    return out\n"
         "\n"
         "def _run():\n"
         "    c = json.load(open(sys.argv[1], encoding='utf-8'))\n"
-        "    exts = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')\n"
         "    imgs = []\n"
         "    for root, dirs, files in os.walk(c['dir']):\n"
         "        dirs[:] = [d for d in dirs if d != '_label_first']\n"
         "        for f in files:\n"
-        "            if f.lower().endswith(exts):\n"
+        "            if f.lower().endswith(EXTS):\n"
         "                imgs.append(os.path.join(root, f))\n"
         "    imgs.sort()\n"
+        "    labeled = _labeled(c['dataset']) if c.get('dataset') else set()\n"
+        "    if labeled:\n"
+        "        before = len(imgs)\n"
+        "        imgs = [p for p in imgs if _ahash(p) not in labeled]\n"
+        "        print('skipped %d already-labelled page(s)' % (before - len(imgs)),\n"
+        "              flush=True)\n"
         "    m = YOLO(c['model'])\n"
         "    scored = []\n"
         "    for i in range(0, len(imgs), 16):\n"
@@ -119,9 +155,9 @@ def build_rank_script(cfg):
         "    _run()\n")
 
 
-def rank_config(model, folder, imgsz=640, conf=0.25):
+def rank_config(model, folder, imgsz=640, conf=0.25, dataset=""):
     return {"model": model, "dir": folder, "imgsz": int(imgsz),
-            "conf": float(conf)}
+            "conf": float(conf), "dataset": dataset or ""}
 
 
 def read_yaml_summary(path):

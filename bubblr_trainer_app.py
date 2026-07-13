@@ -66,7 +66,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.23"
+VERSION = "0.9.24"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -5438,7 +5438,7 @@ class TrainerWindow(QMainWindow):
                 30, 1, 2000)
             if not ok:
                 return
-            cfg = rank_config(model, folder)
+            cfg = rank_config(model, folder, dataset=self._folder or "")
             d = tempfile.mkdtemp(prefix="bubblr_rank_")
             sp = os.path.join(d, "rank.py")
             cp = os.path.join(d, "cfg.json")
