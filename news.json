@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.21",
+  "latest_version": "0.9.22",
   "model_trainer_version": "0.4.0",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-13",
+      "title": "Fix: ranking a big folder said 'no ranked pages'",
+      "text": "In-app ranking now reads the model's full output correctly. Before, a large folder produced a long result line that arrived split across reads and was parsed as empty, so ranking wrongly reported no pages. Fixed by buffering the output and parsing it once complete.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-13",
       "title": "Fix: page ranking could get stuck",

@@ -66,7 +66,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.21"
+VERSION = "0.9.22"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -5447,7 +5447,7 @@ class TrainerWindow(QMainWindow):
             with open(cp, "w", encoding="utf-8") as f:
                 json.dump(cfg, f)
             self._rank_top = top
-            self._rank_out = []
+            self._rank_buf = ""          # accumulate all stdout, parse at the end
             self._rank_mode = "model"
             self._ranking = True
             self._status(self._tr("rank_running"))
@@ -5492,14 +5492,13 @@ class TrainerWindow(QMainWindow):
     def _rank_output(self):
         data = bytes(self._rank_proc.readAllStandardOutput()).decode(
             "utf-8", "replace")
+        # Buffer everything: the final 'BUBBLR_RANK <json>' line can be long and
+        # arrive split across several reads, so we parse it only once complete.
+        self._rank_buf = getattr(self, "_rank_buf", "") + data
         for line in data.splitlines():
-            if line.startswith("BUBBLR_RANK"):
-                try:
-                    self._rank_out = json.loads(line.split(" ", 1)[1])
-                except Exception:                # noqa: BLE001
-                    self._rank_out = []
-            elif line.strip():
-                self._status(self._tr("rank_running") + "  " + line.strip()[:80])
+            s = line.strip()
+            if s and not s.startswith("BUBBLR_RANK"):
+                self._status(self._tr("rank_running") + "  " + s[:80])
 
     def _rank_error(self, _err):
         """The rank process couldn't start (e.g. bad Python path) — clear the
@@ -5513,7 +5512,13 @@ class TrainerWindow(QMainWindow):
             self._status(self._tr("rank_fail"), error=True)
             return
         if getattr(self, "_rank_mode", "") == "model":
-            ranked = getattr(self, "_rank_out", []) or []
+            ranked = []
+            for line in getattr(self, "_rank_buf", "").splitlines():
+                if line.startswith("BUBBLR_RANK"):
+                    try:
+                        ranked = json.loads(line.split(" ", 1)[1])
+                    except Exception:            # noqa: BLE001
+                        ranked = []
             paths = [row[0] for row in ranked[:getattr(self, "_rank_top", 30)]
                      if row and os.path.isfile(row[0])]
             if not paths:
