@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.22",
+  "latest_version": "0.9.23",
   "model_trainer_version": "0.4.0",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-13",
+      "title": "Ranking now scans subfolders",
+      "text": "File → Rank && load now looks inside subfolders (e.g. chapter folders), so a folder whose pages live in sub-directories ranks correctly instead of finding nothing.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-13",
       "title": "Fix: ranking a big folder said 'no ranked pages'",
