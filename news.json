@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.20",
+  "latest_version": "0.9.21",
   "model_trainer_version": "0.4.0",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-13",
+      "title": "Fix: page ranking could get stuck",
+      "text": "Ranking (File → Rank && load) no longer gets permanently stuck doing nothing if a rank job failed to start — it now clears the busy state and shows an error instead of silently ignoring further clicks.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-13",
       "title": "Green button for new AI models",

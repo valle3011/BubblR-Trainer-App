@@ -66,7 +66,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.20"
+VERSION = "0.9.21"
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -5422,8 +5422,13 @@ class TrainerWindow(QMainWindow):
         if not folder:
             return
         self._remember_dir(folder)
-        if getattr(self, "_ranking", False):     # a rank job is already running
+        # only bail if a rank job is GENUINELY still running; otherwise clear a
+        # stale flag (e.g. a previous process that failed to start) so ranking
+        # doesn't get permanently stuck doing nothing.
+        proc = getattr(self, "_rank_proc", None)
+        if proc is not None and proc.state() != QProcess.NotRunning:
             return
+        self._ranking = False
         py = self._ultra_python()
         model = self._rank_model()
         # preferred: in-program ranking with a YOLO model
@@ -5450,6 +5455,7 @@ class TrainerWindow(QMainWindow):
             self._rank_proc.setProcessChannelMode(QProcess.MergedChannels)
             self._rank_proc.readyReadStandardOutput.connect(self._rank_output)
             self._rank_proc.finished.connect(self._rank_finished)
+            self._rank_proc.errorOccurred.connect(self._rank_error)
             self._rank_proc.start(py, ["-u", sp, cp])
             return
         # fallback: the external propose.py tool
@@ -5470,6 +5476,7 @@ class TrainerWindow(QMainWindow):
             self._rank_proc.setProcessChannelMode(QProcess.MergedChannels)
             self._rank_proc.readyReadStandardOutput.connect(self._rank_output)
             self._rank_proc.finished.connect(self._rank_finished)
+            self._rank_proc.errorOccurred.connect(self._rank_error)
             self._rank_proc.start(aipy, ["-u", os.path.join(ai, "propose.py"),
                                          "--dir", folder, "--top", str(top)])
             return
@@ -5493,6 +5500,12 @@ class TrainerWindow(QMainWindow):
                     self._rank_out = []
             elif line.strip():
                 self._status(self._tr("rank_running") + "  " + line.strip()[:80])
+
+    def _rank_error(self, _err):
+        """The rank process couldn't start (e.g. bad Python path) — clear the
+        busy flag so ranking isn't stuck, and tell the user."""
+        self._ranking = False
+        self._status(self._tr("rank_fail"), error=True)
 
     def _rank_finished(self, code, _status):
         self._ranking = False
