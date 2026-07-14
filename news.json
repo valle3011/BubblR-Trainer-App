@@ -1,8 +1,32 @@
 {
-  "latest_version": "0.9.24",
-  "model_trainer_version": "0.4.0",
+  "latest_version": "0.9.25",
+  "model_trainer_version": "0.4.1",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-14",
+      "title": "Customizable keyboard shortcuts",
+      "text": "Settings → Shortcuts lets you rebind every shortcut — the selection tools (rectangle/ellipse/polygon/lasso/wand), Set reading order, Auto order, and all the File/Edit/Page/View commands. Click a field, press your combo, or leave it empty to unbind. Each row has a Reset, plus a 'Reset all to defaults', and clashes are flagged in red. Defaults: R/E/P/L/W for the tools, O for reading order, Ctrl+R for auto order.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-14",
+      "title": "AI-detect & ranking work out of the box",
+      "text": "AI-detect no longer needs a manually-configured AI folder: the app now scans your machine for a Python that has Ultralytics. Settings → Experimental (and the Model Trainer) gained a 'Find' button that auto-detects it and a 'Get Python' button that opens python.org — so you never have to hunt for python.exe.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-14",
+      "title": "Pages panel on the right, plus fixes",
+      "text": "The Pages panel now defaults to the right, wide enough to show two thumbnail columns. Thumbnails no longer look squished when the panel sits along the bottom. The View → Dockers menu now actually shows/hides each panel, and the Settings window uses the dark title bar.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-14",
+      "title": "One-click installer",
+      "text": "A new install.bat builds the app (if needed) and installs it per-user with Desktop and Start-menu shortcuts — no more 'build then run then make a shortcut'. It needs no admin rights, and if a finished build is present it installs that directly even without Python.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-13",
       "title": "Ranking skips pages you already labelled",

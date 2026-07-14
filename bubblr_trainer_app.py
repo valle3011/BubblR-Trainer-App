@@ -29,15 +29,19 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
     QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
     QStyle, QWidgetItem, QTabWidget, QToolBar, QLineEdit, QColorDialog,
-    QTextBrowser)
+    QTextBrowser, QScrollArea, QGridLayout)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
-                         QPalette, QPolygonF, QKeySequence, QIcon, QPixmap)
+                         QPalette, QPolygonF, QKeySequence, QIcon, QPixmap,
+                         QDesktopServices)
+from PyQt5.QtWidgets import QKeySequenceEdit
 from PyQt5.QtCore import (Qt, pyqtSignal, QRectF, QRect, QPoint, QPointF, QTimer,
-                          QSize, QProcess, QItemSelectionModel, QThread)
+                          QSize, QProcess, QItemSelectionModel, QThread, QUrl)
 
 from bubblr_train_core import (MODEL_URL, MODEL_META_URL, model_path,
                                build_detect_script, detect_config,
-                               build_rank_script, rank_config)
+                               build_rank_script, rank_config,
+                               PYTHON_DOWNLOAD_URL, find_python_candidates,
+                               python_has_ultralytics, best_ai_python)
 
 
 class AiModelFetcher(QThread):
@@ -66,7 +70,60 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.24"
+VERSION = "0.9.25"
+# Bump when the DEFAULT dock layout changes so existing users get the new
+# arrangement once (their saved dock state is ignored for that one launch).
+LAYOUT_VERSION = 2
+
+# Customizable keyboard shortcuts. Each entry: id -> (group, label_key, default).
+# `group` orders the Settings → Shortcuts list; `label_key` is a translation key
+# for the row label; `default` is the factory key sequence ("" = unbound).
+# Menu items reuse their menu label key; selectors/order get their own.
+SHORTCUT_GROUPS = ["sc_grp_sel", "sc_grp_ord", "sc_grp_file",
+                   "sc_grp_edit", "sc_grp_page", "sc_grp_view", "sc_grp_help"]
+SHORTCUT_DEFS = [
+    # selectors
+    ("tool_rect",     ("sc_grp_sel",  "sc_tool_rect",    "R")),
+    ("tool_ellipse",  ("sc_grp_sel",  "sc_tool_ellipse", "E")),
+    ("tool_poly",     ("sc_grp_sel",  "sc_tool_poly",    "P")),
+    ("tool_lasso",    ("sc_grp_sel",  "sc_tool_lasso",   "L")),
+    ("tool_wand",     ("sc_grp_sel",  "sc_tool_wand",    "W")),
+    # reading order
+    ("set_order",     ("sc_grp_ord",  "set_order",       "O")),
+    ("auto_order",    ("sc_grp_ord",  "auto_order",      "Ctrl+R")),
+    ("clear_order",   ("sc_grp_ord",  "mi_clear_order",  "")),
+    # file
+    ("mi_open",       ("sc_grp_file", "mi_open",         "Ctrl+O")),
+    ("mi_save",       ("sc_grp_file", "mi_save",         "Ctrl+S")),
+    ("mi_exp_page",   ("sc_grp_file", "mi_exp_page",     "Ctrl+E")),
+    ("mi_exp_all",    ("sc_grp_file", "mi_exp_all",      "Ctrl+Shift+E")),
+    ("mi_exit",       ("sc_grp_file", "mi_exit",         "Ctrl+Q")),
+    # edit
+    ("mi_undo",       ("sc_grp_edit", "mi_undo",         "Ctrl+Z")),
+    ("mi_redo",       ("sc_grp_edit", "mi_redo",         "Ctrl+Y")),
+    ("mi_copy",       ("sc_grp_edit", "mi_copy",         "Ctrl+C")),
+    ("mi_paste",      ("sc_grp_edit", "mi_paste",        "Ctrl+V")),
+    ("mi_dup",        ("sc_grp_edit", "mi_dup",          "Ctrl+D")),
+    ("mi_del",        ("sc_grp_edit", "mi_del",          "Del")),
+    ("fit_box",       ("sc_grp_edit", "fit_box",         "F")),
+    ("mi_select_all", ("sc_grp_edit", "mi_select_all",   "Ctrl+A")),
+    ("deselect",      ("sc_grp_edit", "mi_deselect",     "Esc")),
+    # page
+    ("mi_prev",       ("sc_grp_page", "mi_prev",         "[")),
+    ("mi_next",       ("sc_grp_page", "mi_next",         "]")),
+    ("mi_close",      ("sc_grp_page", "mi_close",        "Ctrl+W")),
+    # view
+    ("mi_zoom_in",    ("sc_grp_view", "mi_zoom_in",      "Ctrl++")),
+    ("mi_zoom_out",   ("sc_grp_view", "mi_zoom_out",     "Ctrl+-")),
+    ("mi_zoom_sel",   ("sc_grp_view", "mi_zoom_sel",     "Z")),
+    # help
+    ("mi_shortcuts",  ("sc_grp_help", "mi_shortcuts",    "F1")),
+]
+SHORTCUT_DEFAULT = {aid: meta[2] for aid, meta in SHORTCUT_DEFS}
+SHORTCUT_META = {aid: meta for aid, meta in SHORTCUT_DEFS}
+# Extra fixed aliases kept alongside the customizable primary (muscle memory).
+SHORTCUT_ALIASES = {"mi_redo": ["Ctrl+Shift+Z"], "mi_del": ["Backspace"]}
+
 KIND_CLASS = {"bubble": 0, "sfx": 1}
 KIND_COLOR = {"bubble": (230, 60, 60), "sfx": (70, 130, 230)}
 # The default (manga) class set. Classes are user-configurable in Settings;
@@ -243,6 +300,13 @@ LANG = {
                     "Ctrl+W — close the current page\n"
                     "Mouse wheel — zoom     middle-drag — pan\n"
                     "F1 — show this help"),
+        "sh_extra": ("1–9 (or B / S) — set the selected box's class\n"
+                     "Arrow keys — nudge the selected box (Shift = 10 px)\n"
+                     "Alt + arrows — resize the selected box (Shift = 10 px)\n"
+                     "Ctrl+click (or the Boxes list) — select several boxes\n"
+                     "Mouse wheel — zoom     middle-drag — pan"),
+        "sh_customize_hint": "Customize any of these in "
+                             "Settings → Shortcuts.",
         "boxes": "Boxes",
         "boxes_tip": "All boxes on this page — click to select, "
                      "drag to reorder (sets the reading order).",
@@ -280,8 +344,8 @@ LANG = {
         "ai_model_ready": "AI model downloaded — use 'AI-detect boxes on this page'.",
         "ai_model_none": "No model available yet (none published, or offline).",
         "ai_need_model": "No AI model downloaded yet. Download the latest one now?",
-        "ai_no_env": "No Python env with Ultralytics found (the BubblR AI tool "
-                     "folder). Set it up first via File → Rank && load.",
+        "ai_no_env": "No Python with Ultralytics found. Open Settings → "
+                     "Experimental and use Find / Get Python next to 'AI Python'.",
         "ai_detecting": "Detecting boxes with the AI…",
         "ai_detect_fail": "AI detection failed (see the AI env / model).",
         "ai_detect_none": "The AI found nothing on this page.",
@@ -403,6 +467,24 @@ LANG = {
                                  "(Windows .exe only).",
         "settings_updates": "Updates",
         "settings_experimental": "Experimental",
+        "settings_shortcuts": "Shortcuts",
+        "sc_intro": "Click a field and press the key combo you want. Leave it "
+                    "empty to unbind. Reset restores the default. A red border "
+                    "means two actions share the same key.",
+        "sc_reset": "Reset",
+        "sc_reset_all": "Reset all to defaults",
+        "sc_grp_sel": "Selection tools",
+        "sc_grp_ord": "Reading order",
+        "sc_grp_file": "File",
+        "sc_grp_edit": "Edit",
+        "sc_grp_page": "Pages",
+        "sc_grp_view": "View",
+        "sc_grp_help": "Help",
+        "sc_tool_rect": "Rectangle tool",
+        "sc_tool_ellipse": "Ellipse tool",
+        "sc_tool_poly": "Polygon tool",
+        "sc_tool_lasso": "Lasso tool",
+        "sc_tool_wand": "Magic-wand tool",
         "exp_intro": "Opt-in switches for features that are still in testing. "
                      "They stay hidden until you turn them on here.",
         "exp_trainer_toggle": "Enable BubblR Model Trainer",
@@ -417,8 +499,21 @@ LANG = {
                          "shared model. Pick your own to use this for other kinds "
                          "of images.",
         "exp_ai_python": "AI Python:",
-        "exp_ai_python_hint": "A python.exe that has Ultralytics installed. Leave "
-                              "empty to auto-detect the BubblR AI .venv.",
+        "exp_ai_python_ph": "empty = find it automatically",
+        "exp_ai_python_hint": "The python.exe used for AI ranking, detection AND "
+                              "training. Leave empty to auto-detect. No Python "
+                              "yet? Use Get Python, then Find, then Model "
+                              "Trainer → Install Ultralytics.",
+        "browse": "Browse…",
+        "py_find": "Find",
+        "py_finding": "Searching…",
+        "py_get": "Get Python",
+        "py_found_ultra": "Found a ready Python (has Ultralytics):\n{p}",
+        "py_found_no_ultra": "Found Python:\n{p}\n\nIt still needs Ultralytics — "
+                             "open the Model Trainer and click 'Install "
+                             "Ultralytics'.",
+        "py_none": "No Python found. Click 'Get Python' to install it from "
+                   "python.org (tick 'Add to PATH'), then press Find again.",
         "update_mode_auto": "Automatic",
         "update_mode_manual": "Manual",
         "update_mode_hint": "Automatic: a newer version is downloaded in the "
@@ -639,6 +734,13 @@ LANG = {
                     "Strg+W — aktuelle Seite schließen\n"
                     "Mausrad — Zoom     Mittel-Ziehen — verschieben\n"
                     "F1 — diese Hilfe anzeigen"),
+        "sh_extra": ("1–9 (oder B / S) — Klasse der ausgewählten Box setzen\n"
+                     "Pfeiltasten — Box verschieben (Umschalt = 10 px)\n"
+                     "Alt + Pfeile — Box skalieren (Umschalt = 10 px)\n"
+                     "Strg+Klick (oder Boxen-Liste) — mehrere Boxen wählen\n"
+                     "Mausrad — Zoom     Mittel-Ziehen — verschieben"),
+        "sh_customize_hint": "Alle hier unter "
+                             "Einstellungen → Tastenkürzel anpassbar.",
         "boxes": "Boxen",
         "boxes_tip": "Alle Boxen dieser Seite — anklicken zum Auswählen, "
                      "ziehen zum Umsortieren (setzt die Lesereihenfolge).",
@@ -679,8 +781,9 @@ LANG = {
         "ai_model_none": "Noch kein Modell verfügbar (nichts veröffentlicht oder "
                          "offline).",
         "ai_need_model": "Noch kein KI-Modell geladen. Jetzt das neueste laden?",
-        "ai_no_env": "Keine Python-Umgebung mit Ultralytics gefunden (der BubblR-"
-                     "AI-Ordner). Richte sie zuerst über Datei → Rank && load ein.",
+        "ai_no_env": "Kein Python mit Ultralytics gefunden. Öffne Einstellungen → "
+                     "Experimentell und nutze „Finden“ / „Python holen“ neben "
+                     "„KI-Python“.",
         "ai_detecting": "KI erkennt Boxen…",
         "ai_detect_fail": "KI-Erkennung fehlgeschlagen (KI-Umgebung / Modell "
                           "prüfen).",
@@ -807,6 +910,25 @@ LANG = {
                                  "installiert (nur Windows-.exe).",
         "settings_updates": "Updates",
         "settings_experimental": "Experimentell",
+        "settings_shortcuts": "Tastenkürzel",
+        "sc_intro": "Feld anklicken und die gewünschte Tastenkombination "
+                    "drücken. Leer lassen = kein Kürzel. „Zurücksetzen“ stellt "
+                    "die Vorgabe wieder her. Ein roter Rand bedeutet, dass sich "
+                    "zwei Aktionen dieselbe Taste teilen.",
+        "sc_reset": "Zurücksetzen",
+        "sc_reset_all": "Alle auf Vorgabe zurücksetzen",
+        "sc_grp_sel": "Auswahlwerkzeuge",
+        "sc_grp_ord": "Lesereihenfolge",
+        "sc_grp_file": "Datei",
+        "sc_grp_edit": "Bearbeiten",
+        "sc_grp_page": "Seiten",
+        "sc_grp_view": "Ansicht",
+        "sc_grp_help": "Hilfe",
+        "sc_tool_rect": "Rechteck-Werkzeug",
+        "sc_tool_ellipse": "Ellipsen-Werkzeug",
+        "sc_tool_poly": "Polygon-Werkzeug",
+        "sc_tool_lasso": "Lasso-Werkzeug",
+        "sc_tool_wand": "Zauberstab-Werkzeug",
         "exp_intro": "Schalter zum Aktivieren von Funktionen, die noch in der "
                      "Testphase sind. Sie bleiben verborgen, bis du sie hier "
                      "einschaltest.",
@@ -823,8 +945,21 @@ LANG = {
                          "geladenes Modell. Ein eigenes wählen, um das Programm "
                          "für andere Bildarten zu nutzen.",
         "exp_ai_python": "KI-Python:",
-        "exp_ai_python_hint": "Eine python.exe mit installiertem Ultralytics. Leer "
-                              "lassen = BubblR-AI-.venv automatisch finden.",
+        "exp_ai_python_ph": "leer = automatisch finden",
+        "exp_ai_python_hint": "Die python.exe für KI-Ranking, -Erkennung UND "
+                              "-Training. Leer lassen = automatisch finden. Noch "
+                              "kein Python? „Python holen“, dann „Finden“, dann im "
+                              "Model Trainer „Install Ultralytics“.",
+        "browse": "Durchsuchen…",
+        "py_find": "Finden",
+        "py_finding": "Suche…",
+        "py_get": "Python holen",
+        "py_found_ultra": "Fertiges Python gefunden (mit Ultralytics):\n{p}",
+        "py_found_no_ultra": "Python gefunden:\n{p}\n\nEs braucht noch "
+                             "Ultralytics — öffne den Model Trainer und klicke "
+                             "„Install Ultralytics“.",
+        "py_none": "Kein Python gefunden. Klicke „Python holen“, installiere es "
+                   "von python.org (Häkchen „Add to PATH“), dann „Finden“.",
         "update_mode_auto": "Automatisch",
         "update_mode_manual": "Manuell",
         "update_mode_hint": "Automatisch: eine neuere Version wird im Hintergrund "
@@ -2055,6 +2190,11 @@ class PageStrip(QListWidget):
         super(PageStrip, self).resizeEvent(ev)
         self._resize_icons()
 
+    # portrait aspect (width/height) of a manga page thumbnail — matches the
+    # 240x300 pixmap cached in _page_thumb. The cell always matches the icon at
+    # this ratio so thumbnails are never squished or clipped.
+    AR = 0.8
+
     def _resize_icons(self):
         vp = self.viewport().size()
         if self._vertical:                       # grid: 1 -> 2 -> 3 … columns
@@ -2062,15 +2202,18 @@ class PageStrip(QListWidget):
             # add a column each time the cells would otherwise pass ~1.5*PREF,
             # so thumbnails grow a bit, then wrap, then grow again
             n = max(1, int(avail / self.PREF + 0.5))
-            cellw = (avail - 2 * n) // n          # a little slack so n cells fit
-            iconw = max(60, cellw - 8)
-            iconh = int(iconw * 1.3)
-            self.setGridSize(QSize(cellw, iconh + 22))
-            self.setIconSize(QSize(iconw, iconh))
+            cellw = max(48, (avail - 2 * n) // n)  # a little slack so n cells fit
+            iconw = max(40, cellw - 8)
+            iconh = int(iconw / self.AR)
         else:                                    # single row, height = the dock
-            self.setGridSize(QSize())            # no forced grid for the strip
-            h = max(56, min(260, vp.height() - 16))
-            self.setIconSize(QSize(int(h * 0.8), h))
+            iconh = max(56, min(320, vp.height() - 16))
+            iconw = int(iconh * self.AR)
+            cellw = iconw + 12
+        # ALWAYS force a grid so every cell is at least as big as its icon —
+        # otherwise the icon can be wider than the cell and get clipped, which
+        # looks like a distorted thumbnail (worst on the bottom/top strip).
+        self.setIconSize(QSize(iconw, iconh))
+        self.setGridSize(QSize(max(cellw, iconw + 8), iconh + 22))
 
 
 class DiscordPresence:
@@ -2425,6 +2568,12 @@ class TrainerWindow(QMainWindow):
         _pu = cfg.get("pending_update")          # staged update from last session
         self._pending_update = _pu if isinstance(_pu, dict) else None
         self._auto_order = bool(cfg.get("auto_order_on", False))
+        # customizable keyboard shortcuts: only non-default overrides are stored
+        raw_sc = cfg.get("shortcuts", {})
+        self._sc_over = {k: str(v) for k, v in raw_sc.items()
+                         if k in SHORTCUT_DEFAULT} if isinstance(raw_sc, dict) else {}
+        self._sc_act = {}                         # id -> QAction (menu items)
+        self._sc_qs = {}                          # id -> QShortcut (tool/global)
         self._rtl = bool(cfg.get("rtl", True))    # manga reading dir (Settings)
         self._center = bool(cfg.get("center_marker", True))  # in Settings now
         self._discord_enabled = bool(cfg.get("discord_enabled", False))
@@ -2626,10 +2775,16 @@ class TrainerWindow(QMainWindow):
         # makes the panel widths/heights persist correctly across runs.
         self._pending_dockstate = cfg.get("dockstate")
         self._pending_dock_sizes = cfg.get("dock_sizes")
+        # When the built-in default layout changes, drop the user's saved dock
+        # arrangement once so they actually see the new default (pages on the
+        # right, sized for two columns). Their own moves are saved again after.
+        if cfg.get("layout_version") != LAYOUT_VERSION:
+            self._pending_dockstate = None
+            self._pending_dock_sizes = None
 
-        # menu bar (also carries the keyboard shortcuts); Esc stays a shortcut
+        # menu bar (also carries the keyboard shortcuts)
         self._build_menu()
-        QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self._deselect)
+        self._install_shortcuts()            # selectors, order, deselect (Esc)
         # class shortcuts: 1..9 pick the Nth class; B/S map to the first two
         # (so the manga bubble/sfx muscle memory still works)
         for _n in range(9):
@@ -2684,9 +2839,11 @@ class TrainerWindow(QMainWindow):
                 "news_enabled": self._news_enabled,
                 "exp_model_trainer": self._experimental_trainer,
                 "auto_update": self._auto_update,
+                "shortcuts": dict(getattr(self, "_sc_over", {})),
                 "pending_update": self._pending_update}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
+            data["layout_version"] = LAYOUT_VERSION
             # Only capture the docker layout while the EDITOR is showing AND the
             # saved layout has already been restored. On the start page the docks
             # are hidden (saving that hides them next time), and before the
@@ -2733,17 +2890,19 @@ class TrainerWindow(QMainWindow):
         self.tools_dock.setWidget(tools_w)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.tools_dock)
 
-        # Boxes docker
+        # Boxes docker — default: left, below the tools
         self.boxes_dock = QDockWidget(self._tr("dock_boxes"), self)
         self.boxes_dock.setObjectName("boxesDock")
         self.boxes_dock.setWidget(self.box_list)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.boxes_dock)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.boxes_dock)
+        self.splitDockWidget(self.tools_dock, self.boxes_dock, Qt.Vertical)
 
-        # Pages (thumbnails) docker — flow adapts to which side it sits on
+        # Pages (thumbnails) docker — default: right, wide enough for 2 columns.
+        # Flow adapts to whichever side it ends up on.
         self.thumbs_dock = QDockWidget(self._tr("dock_pages"), self)
         self.thumbs_dock.setObjectName("thumbsDock")
         self.thumbs_dock.setWidget(self.page_strip)
-        self.addDockWidget(Qt.BottomDockWidgetArea, self.thumbs_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.thumbs_dock)
         self.thumbs_dock.dockLocationChanged.connect(self._apply_thumbs_flow)
 
         self._docks = [self.tools_dock, self.boxes_dock, self.thumbs_dock]
@@ -2756,8 +2915,18 @@ class TrainerWindow(QMainWindow):
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
         self.setCorner(Qt.TopRightCorner, Qt.RightDockWidgetArea)
         self.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)
-        self._apply_thumbs_flow(Qt.BottomDockWidgetArea)
+        self._apply_thumbs_flow(Qt.RightDockWidgetArea)
         self._apply_dock_lock()
+
+    def _apply_default_dock_sizes(self):
+        """Give the pages panel enough width for two thumbnail columns, and keep
+        the tools panel slim — used for a fresh layout (no saved sizes)."""
+        try:
+            self.resizeDocks([self.thumbs_dock], [max(300, PageStrip.PREF * 2 + 40)],
+                             Qt.Horizontal)
+            self.resizeDocks([self.tools_dock], [150], Qt.Horizontal)
+        except Exception:                        # noqa: BLE001
+            pass
 
     def _apply_thumbs_flow(self, area):
         """Thumbnails run in a row on the top/bottom, in a column on the sides.
@@ -2782,16 +2951,31 @@ class TrainerWindow(QMainWindow):
             s.setMinimumWidth(0)
             s.setMinimumHeight(80)
         s.set_vertical(vertical)
+        # When dragged to a new edge the viewport hasn't resized yet, so the
+        # icons would be sized from the OLD dock dimensions. Recompute once the
+        # layout has settled at the new size.
+        QTimer.singleShot(0, s._resize_icons)
+        QTimer.singleShot(60, s._resize_icons)
 
     def _apply_dock_lock(self):
         """Locked = titles stay but panels can't be dragged/floated; unlocked =
-        movable & floatable (Krita/TypeR-style)."""
+        movable, floatable & closable (Krita/TypeR-style)."""
         for d in getattr(self, "_docks", []):
             if self._locked:
                 d.setFeatures(QDockWidget.NoDockWidgetFeatures)
             else:
                 d.setFeatures(QDockWidget.DockWidgetMovable
-                              | QDockWidget.DockWidgetFloatable)
+                              | QDockWidget.DockWidgetFloatable
+                              | QDockWidget.DockWidgetClosable)
+
+    def _sync_docker_menu(self):
+        """Keep the View → Dockers checkmarks in sync with each dock's real
+        visibility (and its current localized title)."""
+        for act, d in getattr(self, "_docker_acts", []):
+            act.blockSignals(True)
+            act.setText(d.windowTitle())
+            act.setChecked(d.isVisible())
+            act.blockSignals(False)
 
     def set_layout_locked(self, locked):
         self._locked = bool(locked)
@@ -3476,9 +3660,15 @@ class TrainerWindow(QMainWindow):
             d.setVisible(True)
         # restoreState is unreliable for dock SIZES, so force them, and again a
         # few times as the layout settles (the editor was just switched in)
-        self._restore_dock_sizes()
-        for delay in (0, 30, 120):
-            QTimer.singleShot(delay, self._restore_dock_sizes)
+        if ds and getattr(self, "_pending_dock_sizes", None):
+            self._restore_dock_sizes()
+            for delay in (0, 30, 120):
+                QTimer.singleShot(delay, self._restore_dock_sizes)
+        else:
+            # Fresh / reset layout: give the pages panel room for two columns.
+            self._apply_default_dock_sizes()
+            for delay in (0, 30, 120):
+                QTimer.singleShot(delay, self._apply_default_dock_sizes)
 
     def _restore_dock_sizes(self):
         """Force each dock back to the width/height it had last session."""
@@ -3634,7 +3824,25 @@ class TrainerWindow(QMainWindow):
         menu.exec_(gpos)
 
     def _show_shortcuts(self):
-        QMessageBox.information(self, self._tr("sh_title"), self._tr("sh_text"))
+        tr = self._tr
+        lines = []
+        for grp in SHORTCUT_GROUPS:
+            rows = []
+            for aid, (g, lbl_key, _d) in SHORTCUT_DEFS:
+                if g != grp:
+                    continue
+                seq = self._sc_seq(aid)
+                keys = QKeySequence(seq).toString(QKeySequence.NativeText) \
+                    if seq else "—"
+                rows.append("   %-22s %s" % (tr(lbl_key), keys))
+            if rows:
+                lines.append(tr(grp))
+                lines.extend(rows)
+                lines.append("")
+        lines.append(tr("sh_extra"))
+        lines.append("")
+        lines.append(tr("sh_customize_hint"))
+        QMessageBox.information(self, tr("sh_title"), "\n".join(lines))
 
     def _show_about(self):
         QMessageBox.about(
@@ -3657,9 +3865,99 @@ class TrainerWindow(QMainWindow):
         bb.rejected.connect(dlg.reject)
         bb.accepted.connect(dlg.accept)
         lay.addWidget(bb)
+        dark_titlebar(dlg)
         dlg.exec_()
 
     # -- menu bar --
+    # -- customizable keyboard shortcuts -------------------------------------
+    def _sc_seq(self, aid):
+        """Effective key sequence for an action id (override, else default)."""
+        return self._sc_over.get(aid, SHORTCUT_DEFAULT.get(aid, ""))
+
+    def _sc_keys(self, aid):
+        """All QKeySequences for an id: the (customizable) primary plus any
+        fixed aliases. An empty primary yields no primary sequence."""
+        seq = self._sc_seq(aid)
+        out = [QKeySequence(seq)] if seq else []
+        out += [QKeySequence(a) for a in SHORTCUT_ALIASES.get(aid, [])]
+        return out
+
+    def _sc_callable(self, aid):
+        """The action to run for a non-menu shortcut id, or None."""
+        return {
+            "tool_rect":    lambda: self._kbd_tool("rect"),
+            "tool_ellipse": lambda: self._kbd_tool("ellipse"),
+            "tool_poly":    lambda: self._kbd_tool("poly"),
+            "tool_lasso":   lambda: self._kbd_tool("lasso"),
+            "tool_wand":    lambda: self._kbd_tool("wand"),
+            "set_order":    lambda: self.order_btn.toggle(),
+            "auto_order":   self.on_auto_order,
+            "clear_order":  self.on_clear_order,
+            "deselect":     self._deselect,
+        }.get(aid)
+
+    def _kbd_tool(self, key):
+        """Pick a marking tool from the keyboard (updates the button too)."""
+        btn = self.tool_btns.get(key)
+        if btn:
+            btn.setChecked(True)
+        self._on_tool(key)
+
+    def _install_shortcuts(self):
+        """Create QShortcuts for the non-menu actions (selectors, reading order,
+        deselect). Menu items get their sequences in _build_menu. Called once."""
+        for aid, (grp, _lbl, _dflt) in SHORTCUT_DEFS:
+            fn = self._sc_callable(aid)
+            if fn is None:                       # menu items handled elsewhere
+                continue
+            qs = QShortcut(QKeySequence(), self)
+            qs.activated.connect(fn)
+            self._sc_qs[aid] = qs
+            self._apply_shortcut(aid)
+
+    def _apply_shortcut(self, aid):
+        """Push the effective sequence(s) onto the live QAction / QShortcut."""
+        keys = self._sc_keys(aid)
+        act = self._sc_act.get(aid)
+        if act is not None:
+            act.setShortcuts(keys)
+        qs = self._sc_qs.get(aid)
+        if qs is not None:
+            qs.setKey(keys[0] if keys else QKeySequence())
+            qs.setEnabled(bool(keys))
+
+    def _set_shortcut(self, aid, seq):
+        """Change a shortcut (seq='' unbinds it), persist, and apply live."""
+        seq = (seq or "").strip()
+        if seq == SHORTCUT_DEFAULT.get(aid, ""):
+            self._sc_over.pop(aid, None)         # back to default -> no override
+        else:
+            self._sc_over[aid] = seq
+        self._apply_shortcut(aid)
+        self._save_settings()
+
+    def _reset_all_shortcuts(self):
+        self._sc_over.clear()
+        for aid, _ in SHORTCUT_DEFS:
+            self._apply_shortcut(aid)
+        self._save_settings()
+
+    def _sc_conflicts(self):
+        """Return the set of ids whose primary sequence collides with another
+        (case-insensitive), so the Settings page can flag them."""
+        seen, bad = {}, set()
+        for aid, _ in SHORTCUT_DEFS:
+            s = self._sc_seq(aid)
+            if not s:
+                continue
+            norm = QKeySequence(s).toString(QKeySequence.PortableText).lower()
+            if norm in seen:
+                bad.add(aid)
+                bad.add(seen[norm])
+            else:
+                seen[norm] = aid
+        return bad
+
     def _build_menu(self):
         self._menu_titles = []               # (menu, key) for retranslation
         self._menu_actions = []              # (action, key)
@@ -3744,8 +4042,17 @@ class TrainerWindow(QMainWindow):
                 if fn == "__dockers__":           # submenu: show/hide each dock
                     sub = menu.addMenu(self._tr(akey))
                     self._menu_titles.append((sub, akey))
+                    # own checkable actions (toggleViewAction is disabled when the
+                    # docks aren't closable, e.g. when panels are locked)
+                    self._docker_acts = []
                     for d in getattr(self, "_docks", []):
-                        sub.addAction(d.toggleViewAction())
+                        act = sub.addAction(d.windowTitle())
+                        act.setCheckable(True)
+                        act.setChecked(d.isVisible())
+                        act.toggled.connect(
+                            lambda on, dk=d: dk.setVisible(on))
+                        self._docker_acts.append((act, d))
+                    sub.aboutToShow.connect(self._sync_docker_menu)
                     continue
                 if fn == "__setclass__":          # submenu: set class of selection
                     self._class_menu = menu.addMenu(self._tr(akey))
@@ -3769,7 +4076,10 @@ class TrainerWindow(QMainWindow):
                     self._menu_actions.append((act, akey))
                     continue
                 act = menu.addAction(self._tr(akey))
-                if isinstance(sc, (list, tuple)):
+                if akey in SHORTCUT_DEFAULT:          # customizable in Settings
+                    self._sc_act[akey] = act
+                    self._apply_shortcut(akey)
+                elif isinstance(sc, (list, tuple)):
                     act.setShortcuts([QKeySequence(s) for s in sc])
                 elif sc:
                     act.setShortcut(QKeySequence(sc))
@@ -3856,8 +4166,10 @@ class TrainerWindow(QMainWindow):
                     QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
                 self._download_ai_model()
             return
-        ai = self._find_ai_dir()
-        py = self._ai_python(ai) if ai else ""
+        # use the full discovery (setting → AI folder → sibling venv → system
+        # scan) so AI-detect works out of the box, not just when an AI folder
+        # is configured
+        py = self._ultra_python()
         if not py:
             self._status(self._tr("ai_no_env"), error=True)
             return
@@ -4469,6 +4781,7 @@ class TrainerWindow(QMainWindow):
                 on_rank_model()
 
         rank_browse.clicked.connect(pick_rank_model)
+        rank_browse.setText(self._tr("browse"))
         rank_dl = QPushButton(self._tr("exp_rank_download"))
         rank_dl.clicked.connect(self._download_ai_model)
         rmrow.addWidget(rank_lbl)
@@ -4484,14 +4797,15 @@ class TrainerWindow(QMainWindow):
         aprow = QHBoxLayout()
         aipy_lbl = QLabel()
         aipy_edit = QLineEdit(self._ai_python_path)
-        aipy_edit.setPlaceholderText("empty = auto-detect the BubblR AI .venv")
+        aipy_edit.setPlaceholderText(self._tr("exp_ai_python_ph"))
 
         def on_aipy():
             self._ai_python_path = aipy_edit.text().strip()
+            self._ultra_python_cache = None      # re-detect with the new setting
             self._save_settings()
 
         aipy_edit.editingFinished.connect(on_aipy)
-        aipy_browse = QPushButton(self._tr("mi_folder"))
+        aipy_browse = QPushButton(self._tr("browse"))
 
         def pick_aipy():
             p, _ = QFileDialog.getOpenFileName(
@@ -4502,15 +4816,125 @@ class TrainerWindow(QMainWindow):
                 on_aipy()
 
         aipy_browse.clicked.connect(pick_aipy)
+        aipy_find = QPushButton(self._tr("py_find"))
+
+        def find_py():
+            aipy_find.setEnabled(False)
+            aipy_find.setText(self._tr("py_finding"))
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                found, ok = best_ai_python()
+            finally:
+                QApplication.restoreOverrideCursor()
+                aipy_find.setEnabled(True)
+                aipy_find.setText(self._tr("py_find"))
+            if found:
+                aipy_edit.setText(found)
+                on_aipy()
+                QMessageBox.information(
+                    self, self._tr("py_find"),
+                    self._tr("py_found_ultra" if ok else "py_found_no_ultra")
+                    .format(p=found))
+            else:
+                QMessageBox.information(self, self._tr("py_find"),
+                                        self._tr("py_none"))
+
+        aipy_find.clicked.connect(find_py)
+        aipy_get = QPushButton(self._tr("py_get"))
+        aipy_get.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(PYTHON_DOWNLOAD_URL)))
         aprow.addWidget(aipy_lbl)
         aprow.addWidget(aipy_edit, 1)
         aprow.addWidget(aipy_browse)
+        aprow.addWidget(aipy_find)
+        aprow.addWidget(aipy_get)
         xv.addLayout(aprow)
         aipy_hint = QLabel()
         aipy_hint.setWordWrap(True)
         aipy_hint.setStyleSheet("color: gray;")
         xv.addWidget(aipy_hint)
         xv.addStretch(1)
+
+        # -- Shortcuts page: customize every keyboard shortcut --
+        scp = QWidget()
+        scv = QVBoxLayout(scp)
+        sc_title = QLabel()
+        sc_title.setStyleSheet("font-weight: bold;")
+        scv.addWidget(sc_title)
+        sc_intro = QLabel()
+        sc_intro.setWordWrap(True)
+        sc_intro.setStyleSheet("color: gray;")
+        scv.addWidget(sc_intro)
+        sc_scroll = QScrollArea()
+        sc_scroll.setWidgetResizable(True)
+        sc_inner = QWidget()
+        sc_grid = QGridLayout(sc_inner)
+        sc_grid.setContentsMargins(0, 4, 0, 4)
+        sc_grid.setHorizontalSpacing(10)
+        sc_grid.setColumnStretch(0, 1)
+        sc_scroll.setWidget(sc_inner)
+        scv.addWidget(sc_scroll, 1)
+        sc_reset_all = QPushButton()
+        scv.addWidget(sc_reset_all, 0, Qt.AlignRight)
+        # row widgets we must retranslate / refresh
+        sc_row_labels = []                   # (QLabel, label_key)
+        sc_group_labels = []                 # (QLabel, group_key)
+        sc_edits = {}                        # id -> QKeySequenceEdit
+
+        def sc_refresh_conflicts():
+            bad = self._sc_conflicts()
+            for aid, ed in sc_edits.items():
+                ed.setStyleSheet("QKeySequenceEdit{border:1px solid #c0392b;}"
+                                 if aid in bad else "")
+
+        def sc_commit(aid, ed):
+            ks = ed.keySequence()
+            self._set_shortcut(aid, ks.toString(QKeySequence.PortableText))
+            sc_refresh_conflicts()
+
+        def sc_reset_one(aid, ed):
+            ed.setKeySequence(QKeySequence(SHORTCUT_DEFAULT.get(aid, "")))
+            self._set_shortcut(aid, SHORTCUT_DEFAULT.get(aid, ""))
+            sc_refresh_conflicts()
+
+        def sc_reset_every():
+            self._reset_all_shortcuts()
+            for aid, ed in sc_edits.items():
+                ed.blockSignals(True)
+                ed.setKeySequence(QKeySequence(self._sc_seq(aid)))
+                ed.blockSignals(False)
+            sc_refresh_conflicts()
+
+        sc_reset_all.clicked.connect(sc_reset_every)
+
+        # build one row per action, grouped by category
+        _r = 0
+        for grp in SHORTCUT_GROUPS:
+            hdr = QLabel()
+            hdr.setStyleSheet("font-weight: bold; margin-top: 8px;")
+            sc_group_labels.append((hdr, grp))
+            sc_grid.addWidget(hdr, _r, 0, 1, 3)
+            _r += 1
+            for aid, (g, lbl_key, _dflt) in SHORTCUT_DEFS:
+                if g != grp:
+                    continue
+                lab = QLabel()
+                sc_row_labels.append((lab, lbl_key))
+                sc_grid.addWidget(lab, _r, 0)
+                ed = QKeySequenceEdit(QKeySequence(self._sc_seq(aid)))
+                ed.setMaximumWidth(160)
+                sc_edits[aid] = ed
+                sc_grid.addWidget(ed, _r, 1)
+                rb = QPushButton()
+                rb.setProperty("sc_reset", True)
+                rb.clicked.connect(
+                    lambda _c=False, a=aid, e=ed: sc_reset_one(a, e))
+                sc_grid.addWidget(rb, _r, 2)
+                ed.editingFinished.connect(
+                    lambda a=aid, e=ed: sc_commit(a, e))
+                _r += 1
+        sc_grid.setRowStretch(_r, 1)
+        sc_refresh_conflicts()
 
         stack.addWidget(disp)
         stack.addWidget(upd)
@@ -4520,6 +4944,7 @@ class TrainerWindow(QMainWindow):
         stack.addWidget(disc)
         stack.addWidget(store)
         stack.addWidget(exp)
+        stack.addWidget(scp)
         nav.currentRowChanged.connect(stack.setCurrentIndex)
 
         def apply_texts():
@@ -4536,6 +4961,7 @@ class TrainerWindow(QMainWindow):
             nav.addItem(tr("settings_discord"))
             nav.addItem(tr("settings_storage"))
             nav.addItem(tr("settings_experimental"))
+            nav.addItem(tr("settings_shortcuts"))
             nav.setCurrentRow(row if row >= 0 else 0)
             nav.blockSignals(False)
             cls_title.setText(tr("settings_classes"))
@@ -4592,6 +5018,16 @@ class TrainerWindow(QMainWindow):
             rank_hint.setText(tr("exp_rank_hint"))
             aipy_lbl.setText(tr("exp_ai_python"))
             aipy_hint.setText(tr("exp_ai_python_hint"))
+            sc_title.setText(tr("settings_shortcuts"))
+            sc_intro.setText(tr("sc_intro"))
+            sc_reset_all.setText(tr("sc_reset_all"))
+            for lab, key in sc_group_labels:
+                lab.setText(tr(key))
+            for lab, key in sc_row_labels:
+                lab.setText(tr(key))
+            for _btn in sc_inner.findChildren(QPushButton):
+                if _btn.property("sc_reset"):
+                    _btn.setText(tr("sc_reset"))
 
         def on_lang(code, on):
             if on and code != self._lang:
@@ -4605,6 +5041,7 @@ class TrainerWindow(QMainWindow):
         outer.addWidget(stack, 1)
         apply_texts()
         nav.setCurrentRow(0)
+        dark_titlebar(dlg)                       # dark window header, like the app
         dlg.exec_()
 
     def _retranslate_menu(self):
@@ -5403,7 +5840,14 @@ class TrainerWindow(QMainWindow):
                 v = self._ai_python(d)
                 if v:
                     return v
-        return ""
+        # last resort: a cached system-wide scan for a python that has
+        # ultralytics (so an outside user doesn't have to hunt for python.exe)
+        cached = getattr(self, "_ultra_python_cache", None)
+        if cached is None:
+            found, ok = best_ai_python()
+            self._ultra_python_cache = found if ok else ""   # only if it works
+            cached = self._ultra_python_cache
+        return cached
 
     def _rank_model(self):
         """The model used for ranking: the chosen one, else the downloaded shared
@@ -5896,6 +6340,7 @@ class TrainerWindow(QMainWindow):
         bb.accepted.connect(dlg.accept)
         bb.rejected.connect(dlg.reject)
         lay.addWidget(bb)
+        dark_titlebar(dlg)
         if dlg.exec_() == QDialog.Accepted:
             self._create_shortcuts(cb_desktop.isChecked(), cb_start.isChecked())
 

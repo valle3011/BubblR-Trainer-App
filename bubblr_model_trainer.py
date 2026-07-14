@@ -20,14 +20,14 @@ from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QSpinBox, QPlainTextEdit,
     QFileDialog, QProgressBar, QMessageBox, QGroupBox, QCheckBox, QDialog,
     QDialogButtonBox, QToolButton, QMenu)
-from PyQt5.QtGui import QColor, QPalette, QFont, QIcon
-from PyQt5.QtCore import QProcess, QTimer, QThread, pyqtSignal
+from PyQt5.QtGui import QColor, QPalette, QFont, QIcon, QDesktopServices
+from PyQt5.QtCore import QProcess, QTimer, QThread, pyqtSignal, QUrl
 
 from bubblr_train_core import (
     read_yaml_summary, build_train_script, train_config, parse_progress,
     strip_ansi, build_predict_script, predict_config, diagnose_error,
     check_dataset, parse_metrics, MODEL_URL, model_path, build_val_script,
-    val_config, read_run_metric)
+    val_config, read_run_metric, PYTHON_DOWNLOAD_URL, best_ai_python)
 
 
 class ModelFetcher(QThread):
@@ -82,7 +82,7 @@ def _ver_tuple(v):
             out.append(0)
     return tuple(out)
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_model_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_model_trainer_shortcut")
@@ -120,16 +120,32 @@ class TrainerWindow(QMainWindow):
         eg = QGridLayout(env_box)
         self.py_edit = QLineEdit(cfg.get("python", ""))
         self.py_edit.setPlaceholderText("path to python.exe with 'ultralytics' installed")
+        self.find_btn = QPushButton("Find")
+        self.find_btn.setToolTip("Auto-detect a Python that already has "
+                                 "Ultralytics installed")
+        self.find_btn.clicked.connect(self._find_python)
         py_browse = QPushButton("Browse…")
         py_browse.clicked.connect(self._pick_python)
+        self.get_py_btn = QPushButton("Get Python")
+        self.get_py_btn.setToolTip("Open python.org to download Python "
+                                   "(if you don't have it yet)")
+        self.get_py_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(PYTHON_DOWNLOAD_URL)))
         self.check_btn = QPushButton("Check")
         self.check_btn.clicked.connect(self._check_env)
         self.install_btn = QPushButton("Install Ultralytics")
         self.install_btn.clicked.connect(self._install_ultra)
         self.env_status = QLabel("—")
+        # buttons that follow the field: Find | Browse | Get Python
+        py_btns = QWidget()
+        pbl = QHBoxLayout(py_btns)
+        pbl.setContentsMargins(0, 0, 0, 0)
+        pbl.addWidget(self.find_btn)
+        pbl.addWidget(py_browse)
+        pbl.addWidget(self.get_py_btn)
         eg.addWidget(QLabel("Python:"), 0, 0)
         eg.addWidget(self.py_edit, 0, 1)
-        eg.addWidget(py_browse, 0, 2)
+        eg.addWidget(py_btns, 0, 2)
         eg.addWidget(self.check_btn, 0, 3)
         eg.addWidget(self.install_btn, 1, 3)
         eg.addWidget(self.env_status, 1, 1, 1, 2)
@@ -382,6 +398,37 @@ class TrainerWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Select python.exe")
         if path:
             self.py_edit.setText(path)
+
+    def _find_python(self):
+        """Scan the machine for a Python that already has Ultralytics, and
+        fall back to any Python it can find — so the user doesn't have to hunt
+        for python.exe."""
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import Qt
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            found, ok = best_ai_python()
+        finally:
+            QApplication.restoreOverrideCursor()
+        if found:
+            self.py_edit.setText(found)
+            if ok:
+                self.env_status.setText("Found a Python with Ultralytics ✓")
+                QMessageBox.information(
+                    self, "Python found",
+                    "Found a Python that already has Ultralytics:\n\n%s" % found)
+            else:
+                self.env_status.setText("Found Python (no Ultralytics yet)")
+                QMessageBox.information(
+                    self, "Python found",
+                    "Found Python, but it doesn't have Ultralytics yet:\n\n%s"
+                    "\n\nClick 'Install Ultralytics' to set it up." % found)
+        else:
+            QMessageBox.warning(
+                self, "No Python found",
+                "Couldn't find a Python install automatically.\n\n"
+                "Click 'Get Python' to download it from python.org, then use "
+                "'Browse…' to select python.exe.")
 
     def _pick_data(self):
         start = os.path.dirname(self.data_edit.text()) or os.path.expanduser("~")

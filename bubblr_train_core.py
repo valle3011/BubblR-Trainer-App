@@ -4,14 +4,94 @@
 Kept separate from the PyQt5 app so the exact command/script the GUI runs can be
 unit-tested and reused without importing Qt."""
 
+import glob
 import os
 import re
+import subprocess
 
 # --- shared model distribution (the BubblR-Model repo) ---
 MODEL_URL = ("https://github.com/valle3011/BubblR-Model/releases/"
              "latest/download/bubblr-model.pt")
 MODEL_META_URL = ("https://raw.githubusercontent.com/valle3011/"
                   "BubblR-Model/main/model.json")
+
+# Where a normal user gets Python (the "Get Python" button opens this).
+PYTHON_DOWNLOAD_URL = "https://www.python.org/downloads/"
+
+
+def _no_window():
+    """subprocess flag so probing Python never flashes a console (Windows)."""
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def find_python_candidates():
+    """Every python.exe we can find on this machine: PATH, the py launcher, the
+    usual install dirs, and the BubblR AI venv. De-duplicated, existing only."""
+    import shutil
+    out, seen = [], set()
+
+    def add(p):
+        if not p:
+            return
+        p = os.path.normpath(p)
+        key = p.lower()
+        if key not in seen and os.path.isfile(p):
+            seen.add(key)
+            out.append(p)
+
+    for name in ("python.exe", "python3.exe", "python", "python3"):
+        add(shutil.which(name))
+    # Windows py launcher lists every installed interpreter
+    if os.name == "nt":
+        try:
+            r = subprocess.run(["py", "-0p"], capture_output=True, text=True,
+                               timeout=8, creationflags=_no_window())
+            for line in (r.stdout or "").splitlines():
+                for tok in line.replace("*", " ").split():
+                    if tok.lower().endswith("python.exe"):
+                        add(tok)
+        except Exception:                        # noqa: BLE001
+            pass
+        home = os.path.expanduser("~")
+        roots = [os.path.join(home, "AppData", "Local", "Programs", "Python"),
+                 r"C:\Program Files", r"C:\Program Files (x86)", r"C:\\"]
+        for root in roots:
+            for pat in ("Python3*", "Python 3*"):
+                for d in glob.glob(os.path.join(root, pat)):
+                    add(os.path.join(d, "python.exe"))
+        # the BubblR AI venv, if it sits in the usual sibling spot
+        base = os.path.dirname(os.path.abspath(__file__))
+        add(os.path.join(base, "..", "BubblR-Test", "ai", ".venv",
+                         "Scripts", "python.exe"))
+    else:
+        for d in ("/usr/bin", "/usr/local/bin"):
+            for pat in ("python3", "python3.*"):
+                for p in glob.glob(os.path.join(d, pat)):
+                    add(p)
+    return out
+
+
+def python_has_ultralytics(py):
+    """True if this python.exe can import ultralytics."""
+    if not py or not os.path.isfile(py):
+        return False
+    try:
+        r = subprocess.run([py, "-c", "import ultralytics"],
+                           capture_output=True, timeout=30,
+                           creationflags=_no_window())
+        return r.returncode == 0
+    except Exception:                            # noqa: BLE001
+        return False
+
+
+def best_ai_python(candidates=None):
+    """Pick the best python for the AI: one that already has ultralytics if
+    possible. Returns (python_path_or_"", has_ultralytics_bool)."""
+    cands = candidates if candidates is not None else find_python_candidates()
+    for p in cands:
+        if python_has_ultralytics(p):
+            return p, True
+    return (cands[0] if cands else ""), False
 
 
 def model_path():
