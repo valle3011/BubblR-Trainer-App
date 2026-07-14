@@ -2,8 +2,9 @@ __pycache__/
 *.pyc
 build/
 dist/
-*.spec
 .deps_ok
+# NOTE: the two PyInstaller .spec files are tracked on purpose — install.ps1
+# builds from them, so a fresh clone cannot install without them.
 # downloaded / trained model weights and YOLO run outputs (never source)
 *.pt
 runs/

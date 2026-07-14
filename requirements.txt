@@ -1,0 +1,7 @@
+# BubblR Trainer — what the GUI itself needs (source mode: run.bat / install.ps1).
+# The AI (detection, ranking, training) runs in a SEPARATE Python that has
+# Ultralytics; it is not installed from here. See README → "AI setup".
+PyQt5>=5.15
+
+# Only needed to build the standalone .exe (install.ps1 installs it on demand):
+#   pyinstaller>=6.0

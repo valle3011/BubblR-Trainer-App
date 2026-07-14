@@ -5,6 +5,7 @@ Kept separate from the PyQt5 app so the exact command/script the GUI runs can be
 unit-tested and reused without importing Qt."""
 
 import glob
+import json
 import os
 import re
 import subprocess
@@ -17,6 +18,9 @@ MODEL_META_URL = ("https://raw.githubusercontent.com/valle3011/"
 
 # Where a normal user gets Python (the "Get Python" button opens this).
 PYTHON_DOWNLOAD_URL = "https://www.python.org/downloads/"
+# PyTorch needs the VC++ runtime; on a fresh Windows it is often missing and
+# torch then dies with a "DLL load failed" that says nothing to the user.
+VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 
 def _no_window():
@@ -24,9 +28,25 @@ def _no_window():
     return getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def is_store_stub(py):
+    """True for the Microsoft-Store 'python.exe' app-execution alias. It is a
+    0-byte-ish stub that just opens the Store, so running it never produces a
+    working interpreter — it must never be picked as the AI Python."""
+    p = os.path.normpath(py or "").lower()
+    if "windowsapps" not in p:
+        return False
+    try:
+        # the real Store Python lives in WindowsApps too, but the alias stub is
+        # a reparse point of ~0 bytes; a genuine interpreter is far bigger
+        return os.path.getsize(py) < 1024
+    except OSError:
+        return True
+
+
 def find_python_candidates():
     """Every python.exe we can find on this machine: PATH, the py launcher, the
-    usual install dirs, and the BubblR AI venv. De-duplicated, existing only."""
+    usual install dirs, and the BubblR AI venv. De-duplicated, existing only.
+    The Microsoft-Store alias stub is skipped (it only opens the Store)."""
     import shutil
     out, seen = [], set()
 
@@ -35,9 +55,10 @@ def find_python_candidates():
             return
         p = os.path.normpath(p)
         key = p.lower()
-        if key not in seen and os.path.isfile(p):
-            seen.add(key)
-            out.append(p)
+        if key in seen or not os.path.isfile(p) or is_store_stub(p):
+            return
+        seen.add(key)
+        out.append(p)
 
     for name in ("python.exe", "python3.exe", "python", "python3"):
         add(shutil.which(name))
@@ -71,22 +92,75 @@ def find_python_candidates():
     return out
 
 
-def python_has_ultralytics(py):
-    """True if this python.exe can import ultralytics."""
+# Probe script: importing ultralytics alone is not enough. Detection needs torch
+# (which fails to import without the VC++ redistributable) and ranking needs
+# Pillow, so an env that passes 'import ultralytics' can still crash the run.
+_PROBE = (
+    "import json\n"
+    "out = {'ok': True, 'errors': [], 'versions': {}, 'cuda': False}\n"
+    "for mod in ('ultralytics', 'torch', 'PIL'):\n"
+    "    try:\n"
+    "        m = __import__(mod)\n"
+    "        out['versions'][mod] = getattr(m, '__version__', '?')\n"
+    "    except Exception as e:\n"
+    "        out['ok'] = False\n"
+    "        out['errors'].append('%s: %s' % (mod, e))\n"
+    "try:\n"
+    "    import torch\n"
+    "    out['cuda'] = bool(torch.cuda.is_available())\n"
+    "except Exception:\n"
+    "    pass\n"
+    "print('BUBBLR_PROBE', json.dumps(out))\n")
+
+
+def probe_ai_python(py):
+    """Really check a python.exe for the AI: it must import ultralytics, torch
+    AND Pillow. Returns (ok, report) where report is
+    {'python', 'versions': {...}, 'cuda': bool, 'errors': [str]} — 'errors' says
+    exactly what is broken, so the UI can tell the user instead of failing with
+    a generic message."""
+    rep = {"python": py or "", "versions": {}, "cuda": False, "errors": []}
     if not py or not os.path.isfile(py):
-        return False
+        rep["errors"].append("python not found: %s" % (py or "(empty)"))
+        return False, rep
+    if is_store_stub(py):
+        rep["errors"].append(
+            "This is the Microsoft-Store placeholder, not a real Python. "
+            "Install Python from python.org.")
+        return False, rep
     try:
-        r = subprocess.run([py, "-c", "import ultralytics"],
-                           capture_output=True, timeout=30,
-                           creationflags=_no_window())
-        return r.returncode == 0
-    except Exception:                            # noqa: BLE001
-        return False
+        r = subprocess.run([py, "-c", _PROBE], capture_output=True, text=True,
+                           timeout=90, creationflags=_no_window())
+    except Exception as e:                       # noqa: BLE001
+        rep["errors"].append("could not run this Python: %s" % e)
+        return False, rep
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("BUBBLR_PROBE"):
+            try:
+                data = json.loads(line.split(" ", 1)[1])
+            except ValueError:
+                continue
+            rep["versions"] = data.get("versions", {})
+            rep["cuda"] = bool(data.get("cuda"))
+            rep["errors"] = data.get("errors", [])
+            return bool(data.get("ok")), rep
+    # no probe line at all: the interpreter itself failed (bad exe, DLL error…)
+    err = (r.stderr or r.stdout or "").strip()
+    rep["errors"].append(err.splitlines()[-1] if err else
+                         "this Python produced no output")
+    return False, rep
+
+
+def python_has_ultralytics(py):
+    """True if this python.exe is actually usable for the AI (ultralytics, torch
+    and Pillow all import). Kept for callers that only need a yes/no."""
+    ok, _rep = probe_ai_python(py)
+    return ok
 
 
 def best_ai_python(candidates=None):
-    """Pick the best python for the AI: one that already has ultralytics if
-    possible. Returns (python_path_or_"", has_ultralytics_bool)."""
+    """Pick the best python for the AI: one that can really run it if possible.
+    Returns (python_path_or_"", usable_bool)."""
     cands = candidates if candidates is not None else find_python_candidates()
     for p in cands:
         if python_has_ultralytics(p):
@@ -98,6 +172,20 @@ def model_path():
     """Local path where the downloaded shared model is kept."""
     d = os.path.join(os.path.expanduser("~"), ".bubblr_ai")
     return os.path.join(d, "bubblr-model.pt")
+
+
+def is_valid_model(path):
+    """True if the file really looks like a Torch checkpoint. A .pt is a zip
+    archive, so it starts with 'PK\\x03\\x04'. Guards against a half-finished
+    download or an HTML error page saved under a .pt name — which would
+    otherwise surface as an unexplained 'detection failed'."""
+    try:
+        if os.path.getsize(path) < 100000:       # a real model is megabytes
+            return False
+        with open(path, "rb") as f:
+            return f.read(4) == b"PK\x03\x04"
+    except OSError:
+        return False
 
 
 def build_detect_script(cfg):
@@ -360,6 +448,19 @@ def diagnose_error(text):
                 "'Install Ultralytics' button.")
     if "no module named 'torch'" in t:
         return "PyTorch is missing — 'Install Ultralytics' installs it too."
+    if "no module named 'pil'" in t or "no module named 'pillow'" in t:
+        return ("Pillow is missing in this Python (ranking needs it) — run "
+                "'Install Ultralytics', which pulls it in.")
+    if "dll load failed" in t or "fbgemm" in t or "c10.dll" in t:
+        return ("PyTorch can't load its DLLs — install the Microsoft Visual "
+                "C++ Redistributable (x64) and restart.")
+    if "numpy" in t and ("1.x cannot be run in" in t or "_array_api" in t
+                         or "binary incompatib" in t):
+        return ("NumPy version clash — run: pip install \"numpy<2\" in the AI "
+                "Python, then retry.")
+    if "weights_only" in t or "unpicklingerror" in t or "invalid load key" in t:
+        return ("The model file is corrupt or incomplete — delete it and "
+                "download the shared model again.")
     if "worker" in t and "exited unexpectedly" in t:
         return "DataLoader crashed — in Advanced set workers to 0 and retry."
     if "no labels found" in t or "missing labels" in t:
@@ -368,6 +469,9 @@ def diagnose_error(text):
     if "does not exist" in t or "no such file" in t:
         return ("A path from data.yaml can't be found — re-export, or fix the "
                 "'path:' line in data.yaml.")
+    if "winerror 5" in t or "permission denied" in t:
+        return ("Access denied — this Python can't be written to. Use a Python "
+                "in your user folder, or reinstall it for your user only.")
     return None
 
 

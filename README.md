@@ -5,14 +5,31 @@ training pages. Same job as the Krita/Photoshop BubblR Trainer plugins, but it
 runs on its own — **no Krita, no Photoshop needed**. Perfect for helpers who
 just want to label images.
 
+## Install from a fresh clone (new PC)
+
+Everything you need is in this repository — no private files.
+
+1. Install **Python 3** from https://www.python.org/downloads/ (tick
+   *Add Python to PATH*).
+2. Clone or download this repo.
+3. Double-click **`install.bat`**.
+
+That builds both apps and puts *BubblR Trainer* and *BubblR Model Trainer* into
+`%LOCALAPPDATA%\Programs\BubblR` with Desktop and Start-menu shortcuts. No admin
+rights needed. To only try it without installing, run **`run.bat`** instead.
+
+For the AI features (detection, ranking, training) see **[AI setup](#ai-setup)**
+below — they need a *second* Python with Ultralytics, which the Model Trainer
+installs for you.
+
 ## Run it
 
 - **No-Python `.exe` (easiest):** run **`dist/BubblR-Trainer/BubblR-Trainer.exe`**
   — no Python or PyQt5 install needed. It's a folder build (fastest start, no
   unpacking) — keep the `BubblR-Trainer` folder together and run the `.exe`
   inside it. Build it yourself with **`build_exe.bat`** (see Notes).
-- **Windows (with Python):** double-click **`run.bat`** — installs PyQt5 the
-  first time, then starts the app.
+- **Windows (with Python):** double-click **`run.bat`** — installs the
+  dependencies from `requirements.txt` the first time, then starts the app.
 - **Shortcuts:** on its **first launch** (any way you start it) the app pops up a
   small **clickable dialog** — tick *Desktop*, *Start menu*, both or neither, and
   it creates the shortcut(s) with the app icon. No console, asked only once. You
@@ -289,6 +306,38 @@ can pull it directly:
 Models in that repo are published only by the maintainer (with a private tool
 that uploads a trained model under the next version number only if it beats the
 currently published one).
+
+## AI setup
+
+The GUI itself only needs PyQt5. The AI (detect, rank, train) runs in a
+**separate Python** that has **Ultralytics** — which also pulls in PyTorch and
+Pillow. All three must import, or the AI can't run.
+
+Getting there:
+
+1. **BubblR Model Trainer → Find** — picks a Python that is already usable.
+2. If none is: **Install Ultralytics** — installs it (and PyTorch) into the
+   selected Python. Takes a few minutes.
+3. **BubblR Trainer → Tools → Download latest AI model**.
+
+**If something is off, use `Tools → Check AI setup…`.** It shows which Python was
+picked, the ultralytics/torch/Pillow versions, whether a GPU is used, and whether
+the model file is there — with a button for whatever is missing. When a detect or
+rank run fails, the error dialog has a **Details** button with the real log from
+the AI process; the app also translates the common ones into a plain hint.
+
+Things that bite on a fresh Windows PC:
+
+| Symptom | Cause / fix |
+|---|---|
+| `DLL load failed` from torch | The **Microsoft Visual C++ Redistributable (x64)** is missing. The check dialog offers a download button. |
+| `No module named 'ultralytics'` | The selected Python isn't the one you installed into — press **Find**, or set *AI Python* in Settings → Experimental. |
+| `No module named 'PIL'` | Ranking needs Pillow. Re-run **Install Ultralytics**. |
+| Detection "fails" with no reason | Old versions swallowed the log. Update — the details are now shown. |
+| Access denied while installing | The Python lives in `Program Files`. The installer now falls back to `pip --user`; otherwise use a Python in your user folder. |
+
+The Microsoft-Store `python.exe` placeholder is ignored on purpose — it only
+opens the Store and can never run the AI.
 
 ## Not just manga — any object detector
 

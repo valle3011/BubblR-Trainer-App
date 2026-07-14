@@ -1,8 +1,32 @@
 {
-  "latest_version": "0.9.25",
-  "model_trainer_version": "0.4.1",
+  "latest_version": "0.9.26",
+  "model_trainer_version": "0.4.2",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-14",
+      "title": "'Install Ultralytics' actually installs it now",
+      "text": "In the .exe build the Model Trainer used itself as the Python for pip, so 'Install Ultralytics' silently never installed anything — which is why AI detection and ranking kept failing on a fresh PC. It now always picks a real python.exe (and falls back to 'pip --user' when the Python sits in Program Files and can't be written to). The same fix applies to training, Test on image and baseline scoring.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-14",
+      "title": "AI errors finally say what went wrong",
+      "text": "'Ranking failed' and 'AI detection failed' used to throw the error away. Now a failed run shows a dialog with the real log plus a plain hint (missing Ultralytics/PyTorch/Pillow, missing VC++ redistributable, NumPy clash, corrupt model file). New: Tools → Check AI setup… lists the chosen Python, the ultralytics/torch/Pillow versions, GPU yes/no and the model file — with a button for whatever is missing. An AI Python that merely exists is no longer trusted: it is probed before use.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-14",
+      "title": "Panels remember whether you closed them",
+      "text": "A docker you close (Tools, Boxes or Pages) now stays closed after a restart instead of reappearing every time — and reopening it from View → Dockers sticks too. Quitting the app no longer counts as 'closing' the panels.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-14",
+      "title": "A fresh clone can install and update itself",
+      "text": "The two PyInstaller .spec files were excluded from the repository, so install.bat could not build the app on a new PC — which also forced you into the source version, where auto-update refused with 'Windows .exe only'. The specs are now part of the repo, together with a requirements.txt and a release workflow. The source version can also update itself now (git pull, from the start page).",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-14",
       "title": "Customizable keyboard shortcuts",

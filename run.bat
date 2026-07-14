@@ -13,15 +13,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem PyQt5 nur EINMAL pruefen/installieren (Marker-Datei). Jeder weitere Start
-rem spart so den zusaetzlichen Python-Prozess fuer den Import-Check -> schneller.
+rem Abhaengigkeiten nur EINMAL pruefen/installieren (Marker-Datei). Jeder weitere
+rem Start spart so den zusaetzlichen Python-Prozess fuer den Import-Check.
 if not exist ".deps_ok" (
   python -c "import PyQt5" 1>nul 2>&1
   if errorlevel 1 (
-    echo PyQt5 wird einmalig installiert ...
-    python -m pip install PyQt5
+    echo Abhaengigkeiten werden einmalig installiert ...
+    python -m pip install -r requirements.txt
     if errorlevel 1 (
-      echo [FEHLER] PyQt5 konnte nicht installiert werden.
+      echo [FEHLER] Die Abhaengigkeiten konnten nicht installiert werden.
       pause
       exit /b 1
     )

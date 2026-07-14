@@ -27,7 +27,8 @@ from bubblr_train_core import (
     read_yaml_summary, build_train_script, train_config, parse_progress,
     strip_ansi, build_predict_script, predict_config, diagnose_error,
     check_dataset, parse_metrics, MODEL_URL, model_path, build_val_script,
-    val_config, read_run_metric, PYTHON_DOWNLOAD_URL, best_ai_python)
+    val_config, read_run_metric, PYTHON_DOWNLOAD_URL, best_ai_python,
+    find_python_candidates)
 
 
 class ModelFetcher(QThread):
@@ -82,7 +83,7 @@ def _ver_tuple(v):
             out.append(0)
     return tuple(out)
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_model_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_model_trainer_shortcut")
@@ -454,25 +455,75 @@ class TrainerWindow(QMainWindow):
 
     # -- environment check / install --
     def _python(self):
-        return self.py_edit.text().strip() or sys.executable
+        """A REAL python.exe to run pip/ultralytics with.
+
+        sys.executable is not usable as a fallback: in the PyInstaller build it
+        is BubblR-Model-Trainer.exe, so 'Install Ultralytics' would have run
+        'BubblR-Model-Trainer.exe -m pip install …' and never install anything.
+        Returns '' when the machine has no Python at all — callers must say so
+        rather than running nonsense."""
+        p = self.py_edit.text().strip()
+        if p:
+            return p
+        if not getattr(sys, "frozen", False):
+            return sys.executable                # source mode: we ARE a python
+        found, _ok = best_ai_python()
+        if not found:
+            cands = find_python_candidates()
+            found = cands[0] if cands else ""
+        if found:
+            self.py_edit.setText(found)          # show what we picked
+        return found
+
+    def _need_python(self):
+        """The Python for pip/ultralytics, or '' after telling the user."""
+        py = self._python()
+        if not py:
+            QMessageBox.warning(
+                self, "No Python found",
+                "No Python installation was found on this PC.\n\n"
+                "Install Python 3 from python.org (tick 'Add Python to PATH'), "
+                "then press Find.")
+        return py
 
     def _check_env(self):
-        self._run_side([self._python(), "-c",
-                        "import ultralytics,torch;"
+        py = self._need_python()
+        if not py:
+            return
+        # Pillow matters too: page ranking imports it, so an env without it
+        # fails later with a message that points nowhere.
+        self._run_side([py, "-c",
+                        "import ultralytics,torch,PIL;"
                         "print('ultralytics',ultralytics.__version__);"
                         "print('torch',torch.__version__);"
+                        "print('pillow',PIL.__version__);"
                         "print('cuda',torch.cuda.is_available())"],
                        "Checking environment…")
 
     def _install_ultra(self):
+        py = self._need_python()
+        if not py:
+            return
+        args = [py, "-m", "pip", "install", "ultralytics"]
+        # A Python installed for all users (Program Files) can't be written to
+        # without admin rights -> install into the user's own site-packages.
+        # Inside a venv --user is rejected, so only do it outside one.
+        if not self._is_venv(py) and not os.access(os.path.dirname(py), os.W_OK):
+            args.insert(4, "--user")
         if QMessageBox.question(
                 self, "Install Ultralytics",
                 "Run 'pip install ultralytics' in:\n%s\n\nThis downloads "
-                "PyTorch and can take a while. Continue?" % self._python(),
+                "PyTorch and can take a while. Continue?" % py,
                 QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
             return
-        self._run_side([self._python(), "-m", "pip", "install", "ultralytics"],
+        self._run_side(args,
                        "Installing Ultralytics (this can take several minutes)…")
+
+    @staticmethod
+    def _is_venv(py):
+        """True if this python.exe belongs to a virtual environment."""
+        return os.path.isfile(os.path.join(os.path.dirname(py), "..",
+                                           "pyvenv.cfg"))
 
     def _run_side(self, args, note):
         """Run a short side command (check/install) streaming into the log."""
@@ -547,7 +598,10 @@ class TrainerWindow(QMainWindow):
         for m in msgs:
             self._append(m + "\n")
         self._append("Training %s on %s\n" % (model, data))
-        self._start_process([self._python(), "-u", self._script_path, cfg_path],
+        py = self._need_python()
+        if not py:
+            return
+        self._start_process([py, "-u", self._script_path, cfg_path],
                             side=False)
 
     def _start_process(self, args, side):
@@ -707,6 +761,9 @@ class TrainerWindow(QMainWindow):
             "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
         if not img:
             return
+        py = self._need_python()
+        if not py:
+            return
         outdir = os.path.join(tempfile.gettempdir(), "bubblr_predict")
         cfg = predict_config(model, img, outdir, "test", self.imgsz.value())
         d = tempfile.mkdtemp(prefix="bubblr_pred_")
@@ -726,7 +783,7 @@ class TrainerWindow(QMainWindow):
         self._proc.errorOccurred.connect(self._on_proc_error)
         self.start_btn.setEnabled(False)
         self.test_btn.setEnabled(False)
-        self._proc.start(self._python(), ["-u", sp, cp])
+        self._proc.start(py, ["-u", sp, cp])
 
     def _on_predict_done(self, code):
         self._proc = None
@@ -769,6 +826,9 @@ class TrainerWindow(QMainWindow):
         dev = self.device.currentText()
         cfg = val_config(baseline, data, self.imgsz.value(),
                          "" if dev == "auto" else dev)
+        py = self._need_python()
+        if not py:
+            return
         d = tempfile.mkdtemp(prefix="bubblr_val_")
         sp = os.path.join(d, "val.py")
         cp = os.path.join(d, "cfg.json")
@@ -785,7 +845,7 @@ class TrainerWindow(QMainWindow):
         self._proc.readyReadStandardOutput.connect(self._val_output)
         self._proc.finished.connect(lambda code, _s: self._on_baseline_done(code))
         self._proc.errorOccurred.connect(self._on_proc_error)
-        self._proc.start(self._python(), ["-u", sp, cp])
+        self._proc.start(py, ["-u", sp, cp])
 
     def _val_output(self):
         data = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")

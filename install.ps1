@@ -39,14 +39,24 @@ if (-not $py) {
 
 # --- 2. Build the exe(s) with PyInstaller --------------------------------
 if (-not $NoBuild) {
+    $specs = @("BubblR-Trainer.spec")
+    if (-not $SkipModelTrainer) { $specs += "BubblR-Model-Trainer.spec" }
+    # The specs are part of the repo. If one is missing the clone is incomplete
+    # (or a stale .gitignore dropped it) - say so instead of failing cryptically.
+    foreach ($spec in $specs) {
+        if (-not (Test-Path (Join-Path $root $spec))) {
+            Fail "$spec fehlt. Hole die Datei aus dem Repository (git pull) und starte erneut."
+        }
+    }
     & $py -c "import PyInstaller" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "PyInstaller wird installiert ..."
         & $py -m pip install pyinstaller
         if ($LASTEXITCODE -ne 0) { Fail "PyInstaller konnte nicht installiert werden." }
     }
-    $specs = @("BubblR-Trainer.spec")
-    if (-not $SkipModelTrainer) { $specs += "BubblR-Model-Trainer.spec" }
+    Write-Host "Abhaengigkeiten werden geprueft ..."
+    & $py -m pip install -r (Join-Path $root "requirements.txt")
+    if ($LASTEXITCODE -ne 0) { Fail "Die Abhaengigkeiten konnten nicht installiert werden." }
     foreach ($spec in $specs) {
         Write-Host "`nBaue $spec ..." -ForegroundColor Cyan
         & $py -m PyInstaller $spec --noconfirm --clean
