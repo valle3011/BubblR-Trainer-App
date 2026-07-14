@@ -168,6 +168,26 @@ def best_ai_python(candidates=None):
     return (cands[0] if cands else ""), False
 
 
+def is_venv(py):
+    """True if this python.exe belongs to a virtual environment."""
+    if not py:
+        return False
+    return os.path.isfile(os.path.join(os.path.dirname(py), "..",
+                                       "pyvenv.cfg"))
+
+
+def pip_install_args(py, package="ultralytics"):
+    """The command that installs `package` into this Python.
+
+    A Python installed for all users (Program Files) can't be written to without
+    admin rights, so fall back to the user's own site-packages. Inside a venv
+    --user is rejected, so it is only added outside one."""
+    args = [py, "-m", "pip", "install", package]
+    if not is_venv(py) and not os.access(os.path.dirname(py), os.W_OK):
+        args.insert(4, "--user")
+    return args
+
+
 def model_path():
     """Local path where the downloaded shared model is kept."""
     d = os.path.join(os.path.expanduser("~"), ".bubblr_ai")

@@ -190,8 +190,9 @@ LANG = {
         "aicheck_none": "not found",
         "aicheck_ok": "Everything is ready — AI detection and ranking will work.",
         "aicheck_bad": "The AI can't run yet:",
-        "aicheck_no_python": "No usable Python was found. Install Python 3, then "
-                             "use 'Install Ultralytics' in the Model Trainer.",
+        "aicheck_no_python": "No usable Python was found. If Python 3 is "
+                             "installed, press 'Install Ultralytics' below — "
+                             "otherwise install Python 3 first.",
         "aicheck_model_missing": "not downloaded",
         "aicheck_model_bad": "the file is corrupt — download it again",
         "aicheck_get_model": "Download model",
@@ -351,19 +352,35 @@ LANG = {
         "exp_ai_python": "AI Python:",
         "exp_ai_python_ph": "empty = find it automatically",
         "exp_ai_python_hint": "The python.exe used for AI ranking, detection AND "
-                              "training. Leave empty to auto-detect. No Python "
-                              "yet? Use Get Python, then Find, then Model "
-                              "Trainer → Install Ultralytics.",
+                              "training. Leave empty to auto-detect. Setting it "
+                              "up: Get Python (if you have none) → Find → "
+                              "Install Ultralytics. That last button installs "
+                              "Ultralytics and PyTorch into this Python; it's a "
+                              "big download and takes a few minutes.",
         "browse": "Browse…",
         "py_find": "Find",
         "py_finding": "Searching…",
         "py_get": "Get Python",
         "py_found_ultra": "Found a ready Python (has Ultralytics):\n{p}",
         "py_found_no_ultra": "Found Python:\n{p}\n\nIt still needs Ultralytics — "
-                             "open the Model Trainer and click 'Install "
-                             "Ultralytics'.",
+                             "click 'Install Ultralytics' right next to this "
+                             "button.",
         "py_none": "No Python found. Click 'Get Python' to install it from "
                    "python.org (tick 'Add to PATH'), then press Find again.",
+        # -- Install Ultralytics, straight from Settings --
+        "py_install": "Install Ultralytics",
+        "py_install_title": "Install Ultralytics",
+        "py_install_ask": "Install Ultralytics (and PyTorch) into:\n{p}\n\n"
+                          "That's a big download and can take several minutes. "
+                          "Continue?",
+        "py_install_running": "Installing Ultralytics… this can take several "
+                              "minutes.",
+        "py_install_busy": "Installing…",
+        "py_install_done": "Ultralytics is installed — the AI is ready.",
+        "py_install_fail": "The installation failed.",
+        "py_install_none": "No Python found to install into. Click 'Get Python', "
+                           "install Python 3, then press Find.",
+        "py_install_close": "Close",
         "update_mode_auto": "Automatic",
         "update_mode_manual": "Manual",
         "update_mode_hint": "Automatic: a newer version is downloaded in the "
@@ -664,9 +681,10 @@ LANG = {
         "aicheck_none": "nicht gefunden",
         "aicheck_ok": "Alles bereit — KI-Erkennung und Ranking funktionieren.",
         "aicheck_bad": "Die KI kann noch nicht laufen:",
-        "aicheck_no_python": "Kein nutzbares Python gefunden. Installiere Python 3 "
-                             "und nutze dann „Install Ultralytics“ im Model "
-                             "Trainer.",
+        "aicheck_no_python": "Kein nutzbares Python gefunden. Falls Python 3 "
+                             "installiert ist, klicke unten auf „Ultralytics "
+                             "installieren“ — sonst zuerst Python 3 "
+                             "installieren.",
         "aicheck_model_missing": "nicht geladen",
         "aicheck_model_bad": "die Datei ist beschädigt — bitte neu laden",
         "aicheck_get_model": "Modell laden",
@@ -833,19 +851,36 @@ LANG = {
         "exp_ai_python": "KI-Python:",
         "exp_ai_python_ph": "leer = automatisch finden",
         "exp_ai_python_hint": "Die python.exe für KI-Ranking, -Erkennung UND "
-                              "-Training. Leer lassen = automatisch finden. Noch "
-                              "kein Python? „Python holen“, dann „Finden“, dann im "
-                              "Model Trainer „Install Ultralytics“.",
+                              "-Training. Leer lassen = automatisch finden. "
+                              "Einrichten: „Python holen“ (falls keins da ist) → "
+                              "„Finden“ → „Ultralytics installieren“. Der letzte "
+                              "Knopf installiert Ultralytics und PyTorch in "
+                              "dieses Python; großer Download, dauert ein paar "
+                              "Minuten.",
         "browse": "Durchsuchen…",
         "py_find": "Finden",
         "py_finding": "Suche…",
         "py_get": "Python holen",
         "py_found_ultra": "Fertiges Python gefunden (mit Ultralytics):\n{p}",
         "py_found_no_ultra": "Python gefunden:\n{p}\n\nEs braucht noch "
-                             "Ultralytics — öffne den Model Trainer und klicke "
-                             "„Install Ultralytics“.",
+                             "Ultralytics — klicke direkt daneben auf "
+                             "„Ultralytics installieren“.",
         "py_none": "Kein Python gefunden. Klicke „Python holen“, installiere es "
                    "von python.org (Häkchen „Add to PATH“), dann „Finden“.",
+        # -- Ultralytics direkt aus den Einstellungen installieren --
+        "py_install": "Ultralytics installieren",
+        "py_install_title": "Ultralytics installieren",
+        "py_install_ask": "Ultralytics (und PyTorch) installieren in:\n{p}\n\n"
+                          "Das ist ein großer Download und kann einige Minuten "
+                          "dauern. Fortfahren?",
+        "py_install_running": "Ultralytics wird installiert… das kann einige "
+                              "Minuten dauern.",
+        "py_install_busy": "Installiere…",
+        "py_install_done": "Ultralytics ist installiert — die KI ist bereit.",
+        "py_install_fail": "Die Installation ist fehlgeschlagen.",
+        "py_install_none": "Kein Python zum Installieren gefunden. Klicke "
+                           "„Python holen“, installiere Python 3, dann „Finden“.",
+        "py_install_close": "Schließen",
         "update_mode_auto": "Automatisch",
         "update_mode_manual": "Manuell",
         "update_mode_hint": "Automatisch: eine neuere Version wird im Hintergrund "

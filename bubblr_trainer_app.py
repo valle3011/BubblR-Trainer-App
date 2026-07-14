@@ -45,7 +45,7 @@ from bubblr_train_core import (MODEL_URL, MODEL_META_URL, model_path,
                                PYTHON_DOWNLOAD_URL, find_python_candidates,
                                python_has_ultralytics, best_ai_python,
                                probe_ai_python, is_valid_model, diagnose_error,
-                               VCREDIST_URL)
+                               VCREDIST_URL, pip_install_args, strip_ansi)
 
 
 class AiModelFetcher(QThread):
@@ -77,7 +77,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.26"
+VERSION = "0.9.27"
 # Bump when the DEFAULT dock layout changes so existing users get the new
 # arrangement once (their saved dock state is ignored for that one launch).
 LAYOUT_VERSION = 2
@@ -4094,11 +4094,22 @@ class TrainerWindow(QMainWindow):
         aipy_get = QPushButton(self._tr("py_get"))
         aipy_get.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(PYTHON_DOWNLOAD_URL)))
+        # Install Ultralytics without leaving the app: this used to live only in
+        # the Model Trainer, which a labeller has no other reason to open.
+        aipy_install = QPushButton(self._tr("py_install"))
+
+        def installed(ok, py):
+            if ok:
+                aipy_edit.setText(py)            # show the env that now works
+
+        aipy_install.clicked.connect(
+            lambda: self._install_ultralytics(on_done=installed))
         aprow.addWidget(aipy_lbl)
         aprow.addWidget(aipy_edit, 1)
         aprow.addWidget(aipy_browse)
         aprow.addWidget(aipy_find)
         aprow.addWidget(aipy_get)
+        aprow.addWidget(aipy_install)
         xv.addLayout(aprow)
         aipy_hint = QLabel()
         aipy_hint.setWordWrap(True)
@@ -4269,6 +4280,7 @@ class TrainerWindow(QMainWindow):
             rank_hint.setText(tr("exp_rank_hint"))
             aipy_lbl.setText(tr("exp_ai_python"))
             aipy_hint.setText(tr("exp_ai_python_hint"))
+            aipy_install.setText(tr("py_install"))
             sc_title.setText(tr("settings_shortcuts"))
             sc_intro.setText(tr("sc_intro"))
             sc_reset_all.setText(tr("sc_reset_all"))
@@ -5125,6 +5137,85 @@ class TrainerWindow(QMainWindow):
         self._ultra_python_cache = None
         self._ai_report = None
 
+    def _install_target_python(self):
+        """The Python to install Ultralytics INTO. Unlike _ultra_python() this
+        does not require a working AI env — that is what we are about to create.
+        Never sys.executable: in the .exe build that is BubblR-Trainer.exe."""
+        p = self._ai_python_path
+        if p and os.path.isfile(p):
+            return p
+        found, _ok = best_ai_python()            # prefers a ready one
+        if found:
+            return found
+        cands = find_python_candidates()
+        return cands[0] if cands else ""
+
+    def _install_ultralytics(self, on_done=None):
+        """Install Ultralytics (and PyTorch) into the chosen Python, right from
+        Settings — so the AI can be set up without opening the Model Trainer.
+        Streams pip's output into a dialog, because this takes minutes and a
+        frozen window looks like a crash."""
+        py = self._install_target_python()
+        if not py:
+            QMessageBox.information(self, self._tr("py_install_title"),
+                                    self._tr("py_install_none"))
+            return
+        if QMessageBox.question(
+                self, self._tr("py_install_title"),
+                self._tr("py_install_ask").format(p=py),
+                QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self._tr("py_install_title"))
+        v = QVBoxLayout(dlg)
+        head = QLabel(self._tr("py_install_running"))
+        head.setWordWrap(True)
+        v.addWidget(head)
+        log = QTextBrowser()
+        log.setStyleSheet("font-family: Consolas, monospace; font-size: 11px;")
+        v.addWidget(log, 1)
+        close = QPushButton(self._tr("py_install_close"))
+        close.setEnabled(False)                  # only once pip is done
+        close.clicked.connect(dlg.accept)
+        v.addWidget(close)
+        dlg.resize(660, 380)
+
+        args = pip_install_args(py)
+        log.append("$ " + " ".join(args) + "\n")
+        proc = QProcess(dlg)
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+
+        def on_out():
+            data = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+            for line in data.splitlines():
+                log.append(strip_ansi(line))
+
+        def on_fin(code, _s):
+            ok = code == 0
+            head.setText(self._tr("py_install_done") if ok
+                         else self._tr("py_install_fail"))
+            head.setStyleSheet("font-weight:bold;color:%s;"
+                               % ("#7ec87e" if ok else "#e06c6c"))
+            close.setEnabled(True)
+            if ok:
+                self._ai_python_path = py        # remember what now works
+                self._forget_ai_python()         # re-probe on the next AI run
+                self._save_settings()
+            elif diagnose_error(log.toPlainText()):
+                log.append("\n" + diagnose_error(log.toPlainText()))
+            if on_done:
+                on_done(ok, py)
+
+        proc.readyReadStandardOutput.connect(on_out)
+        proc.finished.connect(on_fin)
+        proc.errorOccurred.connect(
+            lambda _e: (log.append("could not start: %s" % py),
+                        head.setText(self._tr("py_install_fail")),
+                        close.setEnabled(True)))
+        proc.start(args[0], args[1:])
+        dlg.exec_()
+
     # -- AI failure reporting -------------------------------------------------
     def _ai_failed(self, key, log):
         """Report a failed AI run properly: a short hint in the status bar plus a
@@ -5213,10 +5304,19 @@ class TrainerWindow(QMainWindow):
             b.clicked.connect(lambda: (dlg.accept(), self._download_ai_model()))
             btns.addWidget(b)
         if not py:
-            b = QPushButton(self._tr("aicheck_get_python"))
-            b.clicked.connect(lambda: QDesktopServices.openUrl(
-                QUrl(PYTHON_DOWNLOAD_URL)))
-            btns.addWidget(b)
+            # a Python exists but lacks the packages -> offer to install them
+            # here, instead of sending the user off to the Model Trainer
+            if self._install_target_python():
+                b = QPushButton(self._tr("py_install"))
+                b.clicked.connect(lambda: (dlg.accept(),
+                                           self._install_ultralytics(),
+                                           self._ai_check_dialog()))
+                btns.addWidget(b)
+            else:
+                b = QPushButton(self._tr("aicheck_get_python"))
+                b.clicked.connect(lambda: QDesktopServices.openUrl(
+                    QUrl(PYTHON_DOWNLOAD_URL)))
+                btns.addWidget(b)
         if any("dll load failed" in p.lower() for p in problems):
             b = QPushButton(self._tr("aicheck_vcredist"))
             b.clicked.connect(lambda: QDesktopServices.openUrl(

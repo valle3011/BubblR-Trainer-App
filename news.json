@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.26",
-  "model_trainer_version": "0.4.2",
+  "latest_version": "0.9.27",
+  "model_trainer_version": "0.4.3",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-14",
+      "title": "Install Ultralytics straight from Settings",
+      "text": "Setting up the AI no longer means opening the Model Trainer. Settings → Experimental now has an 'Install Ultralytics' button right next to 'AI Python': it installs Ultralytics and PyTorch into the selected Python and shows pip's output live, so you can see it working. When it succeeds, that Python is remembered as your AI Python. Tools → Check AI setup… offers the same button whenever the packages are what's missing.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-14",
       "title": "'Install Ultralytics' actually installs it now",

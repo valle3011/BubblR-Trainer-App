@@ -28,7 +28,7 @@ from bubblr_train_core import (
     strip_ansi, build_predict_script, predict_config, diagnose_error,
     check_dataset, parse_metrics, MODEL_URL, model_path, build_val_script,
     val_config, read_run_metric, PYTHON_DOWNLOAD_URL, best_ai_python,
-    find_python_candidates)
+    find_python_candidates, pip_install_args)
 
 
 class ModelFetcher(QThread):
@@ -83,7 +83,7 @@ def _ver_tuple(v):
             out.append(0)
     return tuple(out)
 
-VERSION = "0.4.2"
+VERSION = "0.4.3"
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_model_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_model_trainer_shortcut")
@@ -504,26 +504,14 @@ class TrainerWindow(QMainWindow):
         py = self._need_python()
         if not py:
             return
-        args = [py, "-m", "pip", "install", "ultralytics"]
-        # A Python installed for all users (Program Files) can't be written to
-        # without admin rights -> install into the user's own site-packages.
-        # Inside a venv --user is rejected, so only do it outside one.
-        if not self._is_venv(py) and not os.access(os.path.dirname(py), os.W_OK):
-            args.insert(4, "--user")
         if QMessageBox.question(
                 self, "Install Ultralytics",
                 "Run 'pip install ultralytics' in:\n%s\n\nThis downloads "
                 "PyTorch and can take a while. Continue?" % py,
                 QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
             return
-        self._run_side(args,
+        self._run_side(pip_install_args(py),
                        "Installing Ultralytics (this can take several minutes)…")
-
-    @staticmethod
-    def _is_venv(py):
-        """True if this python.exe belongs to a virtual environment."""
-        return os.path.isfile(os.path.join(os.path.dirname(py), "..",
-                                           "pyvenv.cfg"))
 
     def _run_side(self, args, note):
         """Run a short side command (check/install) streaming into the log."""
