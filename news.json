@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.28",
-  "model_trainer_version": "0.4.3",
+  "latest_version": "0.9.29",
+  "model_trainer_version": "0.4.4",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-16",
+      "title": "Fixed: training died with 'WinError 1455' after several minutes",
+      "text": "On Windows every DataLoader worker is a separate process that loads PyTorch and CUDA again, committing hundreds of MB before it reads a single image. With 8 workers (Ultralytics' default), let alone 20, that runs the Windows paging file out of space and training dies — with an error that blames the paging file and never mentions workers. Workers are now capped at 4 on Windows by default, and if you set a higher number yourself the Model Trainer asks first instead of wasting your time. When it still happens, the error now says what to actually change. Verified on a real 237-page dataset that used to fail.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-14",
       "title": "Train your own model, without the second app",

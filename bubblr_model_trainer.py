@@ -28,7 +28,7 @@ from bubblr_train_core import (
     strip_ansi, build_predict_script, predict_config, diagnose_error,
     check_dataset, parse_metrics, MODEL_URL, model_path, build_val_script,
     val_config, read_run_metric, PYTHON_DOWNLOAD_URL, best_ai_python,
-    find_python_candidates, pip_install_args)
+    find_python_candidates, pip_install_args, safe_workers)
 
 
 class ModelFetcher(QThread):
@@ -83,7 +83,7 @@ def _ver_tuple(v):
             out.append(0)
     return tuple(out)
 
-VERSION = "0.4.3"
+VERSION = "0.4.4"
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_model_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_model_trainer_shortcut")
@@ -271,9 +271,12 @@ class TrainerWindow(QMainWindow):
         ag = QGridLayout(adv_box)
         self.workers = QSpinBox()
         self.workers.setRange(0, 32)
-        self.workers.setValue(int(cfg.get("workers", 8)))
-        self.workers.setToolTip("DataLoader workers. Set 0 if training crashes "
-                                "with 'worker exited unexpectedly'.")
+        self.workers.setValue(int(cfg.get("workers", safe_workers())))
+        self.workers.setToolTip(
+            "DataLoader workers. On Windows each one loads PyTorch + CUDA in "
+            "its own process, so more than %d tends to exhaust the paging file "
+            "('WinError 1455'). Set 0 if training crashes with 'worker exited "
+            "unexpectedly'." % safe_workers())
         self.cache_box = QCheckBox("Cache images (faster, more RAM)")
         self.cache_box.setChecked(bool(cfg.get("cache", False)))
         self.pretrained_box = QCheckBox("Start from pretrained weights")
@@ -562,6 +565,26 @@ class TrainerWindow(QMainWindow):
                 return
             model = last
         workers = self.workers.value() if self.adv_box.isChecked() else None
+        # On Windows each worker is a separate process that loads PyTorch + CUDA
+        # again. Past ~4 that exhausts the paging file and the run dies with
+        # WinError 1455 — but only after minutes of setup, and the error blames
+        # the paging file, not the workers. Say so before the time is wasted.
+        if os.name == "nt" and workers is not None and workers > safe_workers():
+            capped = safe_workers()
+            ans = QMessageBox.question(
+                self, "Too many workers",
+                "Workers is set to %d. On Windows every worker loads PyTorch "
+                "and CUDA in its own process, and more than %d usually runs the "
+                "paging file out of space — training then dies with "
+                "'WinError 1455' after several minutes.\n\n"
+                "Use %d instead?" % (workers, capped, capped),
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                QMessageBox.Yes)
+            if ans == QMessageBox.Cancel:
+                return
+            if ans == QMessageBox.Yes:
+                workers = capped
+                self.workers.setValue(capped)     # remember it for next time
         cfg = train_config(
             model, data, self.epochs.value(), self.imgsz.value(),
             self.batch.value(), "" if dev == "auto" else dev, project, name,

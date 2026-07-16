@@ -368,6 +368,23 @@ def rank_config(model, folder, imgsz=640, conf=0.25, dataset="", datasets=None):
             "dataset": stores[0] if stores else ""}
 
 
+def safe_workers(requested=None):
+    """A DataLoader worker count that survives Windows.
+
+    Workers are spawned processes there, not forks: each re-imports torch and
+    maps the CUDA runtime, committing hundreds of MB before it reads a single
+    image. Ultralytics' default of 8 (let alone 20) blows the paging file and
+    training dies with WinError 1455, which blames the paging file and never
+    mentions workers. Cap it at 4 on Windows; elsewhere fork makes it cheap and
+    the caller's choice stands."""
+    cpu = os.cpu_count() or 4
+    if requested is None:
+        requested = 8 if os.name != "nt" else 4
+    if os.name == "nt":
+        return max(0, min(int(requested), 4, cpu))
+    return max(0, min(int(requested), cpu))
+
+
 def safe_run_name(name, fallback="my-model"):
     """Turn what the user typed into a name usable as a folder: Ultralytics puts
     the run in <project>/<name>/, so characters Windows rejects would make the
@@ -458,8 +475,10 @@ def train_config(model, data, epochs, imgsz, batch, device, project, name,
            "project": project, "name": name, "patience": int(patience),
            "cache": bool(cache), "pretrained": bool(pretrained),
            "resume": bool(resume)}
-    if workers is not None:
-        cfg["workers"] = int(workers)
+    # Never leave the worker count to Ultralytics' default on Windows: 8 spawned
+    # processes each loading CUDA is enough to exhaust the paging file. An
+    # explicit choice is respected — the caller warns about it instead.
+    cfg["workers"] = int(workers) if workers is not None else safe_workers()
     return cfg
 
 
@@ -512,6 +531,15 @@ def diagnose_error(text):
     if "weights_only" in t or "unpicklingerror" in t or "invalid load key" in t:
         return ("The model file is corrupt or incomplete — delete it and "
                 "download the shared model again.")
+    # Windows: every DataLoader worker is a fresh process that re-imports torch
+    # and maps the CUDA DLLs, and each one commits a lot of memory. Too many
+    # workers exhausts the paging file long before the GPU runs out. The error
+    # names the paging file, not the workers, so say what actually helps.
+    if ("1455" in t or "auslagerungsdatei" in t or "paging file" in t
+            or "shared file mapping" in t):
+        return ("Windows ran out of paging file — too many DataLoader workers. "
+                "Set Workers to 2-4 under Advanced (each one loads PyTorch + "
+                "CUDA separately), or enlarge the Windows paging file.")
     if "worker" in t and "exited unexpectedly" in t:
         return "DataLoader crashed — in Advanced set workers to 0 and retry."
     if "no labels found" in t or "missing labels" in t:
