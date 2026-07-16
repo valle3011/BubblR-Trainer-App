@@ -79,7 +79,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.29"
+VERSION = "0.9.31"
 # Bump when the DEFAULT dock layout changes so existing users get the new
 # arrangement once (their saved dock state is ignored for that one launch).
 LAYOUT_VERSION = 2
