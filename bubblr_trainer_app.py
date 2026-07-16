@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QInputDialog, QActionGroup, QMenu,
     QStackedWidget, QRadioButton, QDockWidget, QToolButton, QLayout,
     QStyle, QWidgetItem, QTabWidget, QToolBar, QLineEdit, QColorDialog,
-    QTextBrowser, QScrollArea, QGridLayout)
+    QTextBrowser, QScrollArea, QGridLayout, QProgressBar)
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPen, QBrush, QImage,
                          QPalette, QPolygonF, QKeySequence, QIcon, QPixmap,
                          QDesktopServices)
@@ -45,7 +45,9 @@ from bubblr_train_core import (MODEL_URL, MODEL_META_URL, model_path,
                                PYTHON_DOWNLOAD_URL, find_python_candidates,
                                python_has_ultralytics, best_ai_python,
                                probe_ai_python, is_valid_model, diagnose_error,
-                               VCREDIST_URL, pip_install_args, strip_ansi)
+                               VCREDIST_URL, pip_install_args, strip_ansi,
+                               build_train_script, train_config, check_dataset,
+                               parse_progress, safe_run_name)
 
 
 class AiModelFetcher(QThread):
@@ -77,7 +79,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.27"
+VERSION = "0.9.28"
 # Bump when the DEFAULT dock layout changes so existing users get the new
 # arrangement once (their saved dock state is ignored for that one launch).
 LAYOUT_VERSION = 2
@@ -1670,6 +1672,15 @@ class TrainerWindow(QMainWindow):
         cfg = self._load_settings()
         self._lang = cfg.get("lang", "en")
         self._folder = cfg.get("folder", "")
+        # extra places to look for pages that are already labelled (on top of the
+        # dataset folder) — e.g. an older dataset, or a helper's export
+        self._label_dirs = [p for p in (cfg.get("label_dirs") or [])
+                            if isinstance(p, str)]
+        # where "Train your own model" puts its runs, and what it calls them
+        self._train_out = cfg.get("train_out", "")
+        self._train_name = cfg.get("train_name", "")
+        self._train_epochs = int(cfg.get("train_epochs", 100))
+        self._train_imgsz = int(cfg.get("train_imgsz", 640))
         self._last_dir = cfg.get("last_dir", "")  # last place a dialog was used
         self._recent = [p for p in cfg.get("recent", []) if isinstance(p, str)]
         self._ai_dir = cfg.get("ai_dir", "")     # optional BubblR AI tool folder
@@ -1968,6 +1979,10 @@ class TrainerWindow(QMainWindow):
                 "auto_update": self._auto_update,
                 "shortcuts": dict(getattr(self, "_sc_over", {})),
                 "dock_visible": dict(getattr(self, "_dock_wanted", {})),
+                "label_dirs": list(self._label_dirs),
+                "train_out": self._train_out, "train_name": self._train_name,
+                "train_epochs": self._train_epochs,
+                "train_imgsz": self._train_imgsz,
                 "pending_update": self._pending_update}
         try:
             data["geo"] = bytes(self.saveGeometry()).hex()
@@ -3239,6 +3254,7 @@ class TrainerWindow(QMainWindow):
                 ("mi_discord", "__discord__", None),
             ]),
             ("m_tools", [
+                ("mi_train_own", self._train_own_model, None),
                 ("mi_train_model", self._launch_model_trainer, None),
                 None,
                 ("mi_get_model", self._download_ai_model, None),
@@ -3900,6 +3916,7 @@ class TrainerWindow(QMainWindow):
         def choose():
             self.on_choose_folder()
             path_lbl.setText(self._folder or self._tr("settings_folder_none"))
+            lsrc_refresh()                       # it is always a label source
 
         choose_btn.clicked.connect(choose)
         sv.addWidget(choose_btn)
@@ -3978,6 +3995,73 @@ class TrainerWindow(QMainWindow):
         coco_hint.setWordWrap(True)
         coco_hint.setStyleSheet("color: gray;")
         sv.addWidget(coco_hint)
+
+        # -- where ranking looks for pages that are already labelled --
+        sv.addSpacing(16)
+        lsrc_title = QLabel()
+        lsrc_title.setStyleSheet("font-weight: bold;")
+        sv.addWidget(lsrc_title)
+        lsrc_hint = QLabel()
+        lsrc_hint.setWordWrap(True)
+        lsrc_hint.setStyleSheet("color: gray;")
+        sv.addWidget(lsrc_hint)
+        lsrc_ds = QLabel()
+        lsrc_ds.setWordWrap(True)
+        lsrc_ds.setStyleSheet("color: gray;")
+        sv.addWidget(lsrc_ds)
+        lsrc_list = QListWidget()
+        lsrc_list.setMaximumHeight(110)
+        sv.addWidget(lsrc_list)
+        lsrc_empty = QLabel()
+        lsrc_empty.setWordWrap(True)
+        lsrc_empty.setStyleSheet("color: gray;")
+        sv.addWidget(lsrc_empty)
+
+        def lsrc_refresh():
+            lsrc_list.clear()
+            for p in self._label_dirs:
+                it = QListWidgetItem(p)
+                if not os.path.isdir(p):         # kept, but flagged as gone
+                    it.setForeground(QColor("#e06c6c"))
+                    it.setToolTip(self._tr("recent_missing"))
+                lsrc_list.addItem(it)
+            lsrc_empty.setVisible(not self._label_dirs)
+            lsrc_ds.setText(
+                self._tr("lbl_src_dataset").format(p=self._folder)
+                if self._folder else self._tr("lbl_src_dataset_none"))
+
+        def lsrc_add():
+            p = QFileDialog.getExistingDirectory(
+                dlg, self._tr("lbl_src_pick"), self._start_dir())
+            if not p:
+                return
+            p = os.path.normpath(p)
+            if p in self._label_dirs or p == os.path.normpath(self._folder or ""):
+                QMessageBox.information(dlg, self._tr("lbl_src_title"),
+                                        self._tr("lbl_src_dupe"))
+                return
+            self._label_dirs.append(p)
+            self._remember_dir(p)
+            self._save_settings()
+            lsrc_refresh()
+
+        def lsrc_remove():
+            row = lsrc_list.currentRow()
+            if 0 <= row < len(self._label_dirs):
+                del self._label_dirs[row]
+                self._save_settings()
+                lsrc_refresh()
+
+        lsrc_row = QHBoxLayout()
+        lsrc_add_btn = QPushButton()
+        lsrc_add_btn.clicked.connect(lsrc_add)
+        lsrc_del_btn = QPushButton()
+        lsrc_del_btn.clicked.connect(lsrc_remove)
+        lsrc_row.addWidget(lsrc_add_btn)
+        lsrc_row.addWidget(lsrc_del_btn)
+        lsrc_row.addStretch(1)
+        sv.addLayout(lsrc_row)
+        lsrc_refresh()
         sv.addStretch(1)
 
         # -- Experimental page: opt-in switches for unfinished features --
@@ -4262,6 +4346,12 @@ class TrainerWindow(QMainWindow):
             store_title.setText(tr("settings_folder_title"))
             choose_btn.setText(tr("mi_folder"))
             path_lbl.setText(self._folder or tr("settings_folder_none"))
+            lsrc_title.setText(tr("lbl_src_title"))
+            lsrc_hint.setText(tr("lbl_src_hint"))
+            lsrc_add_btn.setText(tr("lbl_src_add"))
+            lsrc_del_btn.setText(tr("lbl_src_remove"))
+            lsrc_empty.setText(tr("lbl_src_none"))
+            lsrc_refresh()
             val_lbl.setText(tr("val_split"))
             val_hint.setText(tr("val_split_hint"))
             summ_box.setText(tr("export_summary_toggle"))
@@ -5216,6 +5306,287 @@ class TrainerWindow(QMainWindow):
         proc.start(args[0], args[1:])
         dlg.exec_()
 
+    # -- train your own model (in-app) ---------------------------------------
+    def _default_train_out(self):
+        """Where trained models go unless the user picks somewhere else: next to
+        the dataset, so the pages and the model they produced stay together."""
+        if self._train_out:
+            return self._train_out
+        if self._folder and os.path.isdir(self._folder):
+            return os.path.join(self._folder, "models")
+        return os.path.join(os.path.expanduser("~"), "BubblR-models")
+
+    def _train_own_model(self):
+        """Train a model on the pages the user labelled, without leaving the app.
+        The Model Trainer is still there for the full set of knobs; this covers
+        the common case with the four things that actually matter: what it's
+        called, where it lands, what it starts from, and how long it runs."""
+        if getattr(self, "_train_proc", None) is not None:
+            QMessageBox.information(self, self._tr("train_own_title"),
+                                    self._tr("train_own_busy"))
+            return
+        data = os.path.join(self._folder or "", "data.yaml")
+        if not os.path.isfile(data):
+            QMessageBox.information(self, self._tr("train_own_title"),
+                                    self._tr("train_own_need_data"))
+            return
+        ok, msgs = check_dataset(data)
+        if not ok:
+            QMessageBox.information(
+                self, self._tr("train_own_title"),
+                self._tr("train_own_need_data") + "\n\n" + "\n".join(msgs))
+            return
+        py = self._ultra_python()
+        if not py:
+            QMessageBox.information(self, self._tr("train_own_title"),
+                                    self._tr("train_own_need_py"))
+            self._ai_check_dialog()
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self._tr("train_own_title"))
+        v = QVBoxLayout(dlg)
+        intro = QLabel(self._tr("train_own_intro"))
+        intro.setWordWrap(True)
+        v.addWidget(intro)
+        v.addSpacing(6)
+
+        def hint(key):
+            h = QLabel(self._tr(key))
+            h.setWordWrap(True)
+            h.setStyleSheet("color: gray; margin-bottom: 6px;")
+            return h
+
+        # name
+        row = QHBoxLayout()
+        row.addWidget(QLabel(self._tr("train_own_name")))
+        name_edit = QLineEdit(self._train_name
+                              or safe_run_name(os.path.basename(
+                                  self._folder or "") + "-v1"))
+        row.addWidget(name_edit, 1)
+        v.addLayout(row)
+        v.addWidget(hint("train_own_name_hint"))
+
+        # save location
+        row = QHBoxLayout()
+        row.addWidget(QLabel(self._tr("train_own_out")))
+        out_edit = QLineEdit(self._default_train_out())
+        row.addWidget(out_edit, 1)
+        out_btn = QPushButton(self._tr("browse"))
+
+        def pick_out():
+            p = QFileDialog.getExistingDirectory(
+                dlg, self._tr("train_own_pick_out"),
+                out_edit.text() or self._start_dir())
+            if p:
+                out_edit.setText(os.path.normpath(p))
+
+        out_btn.clicked.connect(pick_out)
+        row.addWidget(out_btn)
+        v.addLayout(row)
+        v.addWidget(hint("train_own_out_hint"))
+
+        # what it learns from (fixed: the exported dataset)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(self._tr("train_own_data")))
+        data_lbl = QLabel("%s  (%s)" % (self._folder, "; ".join(msgs)))
+        data_lbl.setWordWrap(True)
+        row.addWidget(data_lbl, 1)
+        v.addLayout(row)
+        v.addWidget(hint("train_own_data_hint"))
+
+        # base model
+        row = QHBoxLayout()
+        row.addWidget(QLabel(self._tr("train_own_base")))
+        base_combo = QComboBox()
+        base_combo.addItem(self._tr("train_own_base_shared"), "__shared__")
+        base_combo.addItem(self._tr("train_own_base_yolo"), "yolo11n.pt")
+        base_combo.addItem(self._tr("train_own_base_yolos"), "yolo11s.pt")
+        base_combo.addItem(self._tr("train_own_base_custom"), "__custom__")
+        if not is_valid_model(model_path()):
+            base_combo.setCurrentIndex(1)        # no shared model downloaded yet
+        row.addWidget(base_combo, 1)
+        v.addLayout(row)
+        custom_lbl = QLabel()
+        custom_lbl.setStyleSheet("color: gray;")
+        custom_lbl.setWordWrap(True)
+        custom_lbl.setVisible(False)
+        v.addWidget(custom_lbl)
+        v.addWidget(hint("train_own_base_hint"))
+        self._train_custom_base = ""
+
+        def on_base(_i):
+            if base_combo.currentData() != "__custom__":
+                custom_lbl.setVisible(False)
+                return
+            p, _ = QFileDialog.getOpenFileName(
+                dlg, self._tr("train_own_pick_base"), self._start_dir(),
+                "PyTorch weights (*.pt)")
+            if p:
+                self._train_custom_base = p
+                custom_lbl.setText(p)
+                custom_lbl.setVisible(True)
+            else:
+                base_combo.setCurrentIndex(0)
+
+        base_combo.currentIndexChanged.connect(on_base)
+
+        # epochs + image size
+        row = QHBoxLayout()
+        row.addWidget(QLabel(self._tr("train_own_epochs")))
+        ep_spin = QSpinBox()
+        ep_spin.setRange(1, 2000)
+        ep_spin.setValue(self._train_epochs)
+        ep_spin.setFixedWidth(90)
+        row.addWidget(ep_spin)
+        row.addSpacing(18)
+        row.addWidget(QLabel(self._tr("train_own_imgsz")))
+        sz_combo = QComboBox()
+        for s in (512, 640, 800, 1024, 1280):
+            sz_combo.addItem(str(s), s)
+        sz_combo.setCurrentText(str(self._train_imgsz))
+        row.addWidget(sz_combo)
+        row.addStretch(1)
+        v.addLayout(row)
+        v.addWidget(hint("train_own_epochs_hint"))
+        v.addWidget(hint("train_own_imgsz_hint"))
+
+        status = QLabel("")
+        status.setWordWrap(True)
+        v.addWidget(status)
+        bar = QProgressBar()
+        bar.setVisible(False)
+        v.addWidget(bar)
+        log = QTextBrowser()
+        log.setStyleSheet("font-family: Consolas, monospace; font-size: 11px;")
+        log.setVisible(False)
+        log.setMinimumHeight(150)
+        v.addWidget(log, 1)
+
+        btn_row = QHBoxLayout()
+        start_btn = QPushButton(self._tr("train_own_start"))
+        stop_btn = QPushButton(self._tr("train_own_stop"))
+        stop_btn.setVisible(False)
+        use_btn = QPushButton(self._tr("train_own_use"))
+        use_btn.setVisible(False)
+        close_btn = QPushButton(self._tr("train_own_close"))
+        close_btn.clicked.connect(dlg.reject)
+        btn_row.addWidget(start_btn)
+        btn_row.addWidget(stop_btn)
+        btn_row.addWidget(use_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        v.addLayout(btn_row)
+        dlg.resize(640, 560)
+
+        def start():
+            base = base_combo.currentData()
+            if base == "__shared__":
+                base = model_path()
+            elif base == "__custom__":
+                base = self._train_custom_base
+                if not base:
+                    return
+            name = safe_run_name(name_edit.text())
+            name_edit.setText(name)              # show what we actually use
+            out = out_edit.text().strip() or self._default_train_out()
+            try:
+                os.makedirs(out, exist_ok=True)
+            except OSError as e:
+                status.setText(self._tr("train_own_fail") + "\n%s" % e)
+                return
+            self._train_name, self._train_out = name, out
+            self._train_epochs = ep_spin.value()
+            self._train_imgsz = sz_combo.currentData()
+            self._save_settings()
+            cfg = train_config(base, data, self._train_epochs, self._train_imgsz,
+                               batch=-1, device="", project=out, name=name)
+            d = tempfile.mkdtemp(prefix="bubblr_train_")
+            sp, cp = os.path.join(d, "train.py"), os.path.join(d, "cfg.json")
+            with open(sp, "w", encoding="utf-8") as f:
+                f.write(build_train_script(cfg))
+            with open(cp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f)
+            self._train_log = ""
+            self._train_result = os.path.join(out, name, "weights", "best.pt")
+            for w in (start_btn,):
+                w.setVisible(False)
+            stop_btn.setVisible(True)
+            log.setVisible(True)
+            bar.setVisible(True)
+            bar.setRange(0, 0)                   # busy until the first epoch
+            status.setText(self._tr("train_own_starting"))
+            proc = QProcess(dlg)
+            self._train_proc = proc
+            proc.setProcessChannelMode(QProcess.MergedChannels)
+
+            def on_out():
+                data_s = bytes(proc.readAllStandardOutput()).decode(
+                    "utf-8", "replace")
+                self._train_log += data_s
+                for line in data_s.splitlines():
+                    line = strip_ansi(line)
+                    if line.strip():
+                        log.append(line)
+                    p = parse_progress(line)
+                    if p:
+                        cur, tot = p
+                        bar.setRange(0, tot)
+                        bar.setValue(cur)
+                        status.setText(self._tr("train_own_running")
+                                       .format(c=cur, t=tot))
+
+            def on_fin(code, _s):
+                self._train_proc = None
+                stop_btn.setVisible(False)
+                start_btn.setVisible(True)
+                bar.setVisible(False)
+                stopped = getattr(self, "_train_stopping", False)
+                self._train_stopping = False
+                if stopped:
+                    status.setText(self._tr("train_own_stopped"))
+                    return
+                if code == 0 and os.path.isfile(self._train_result):
+                    status.setText(self._tr("train_own_done")
+                                   .format(p=self._train_result))
+                    status.setStyleSheet("color:#7ec87e;font-weight:bold;")
+                    use_btn.setVisible(True)
+                else:
+                    status.setText(self._tr("train_own_fail"))
+                    status.setStyleSheet("color:#e06c6c;font-weight:bold;")
+                    h = diagnose_error(self._train_log)
+                    if h:
+                        log.append("\n" + h)
+
+            proc.readyReadStandardOutput.connect(on_out)
+            proc.finished.connect(on_fin)
+            proc.errorOccurred.connect(
+                lambda _e: (log.append("could not start: %s" % py),
+                            status.setText(self._tr("train_own_fail"))))
+            proc.start(py, ["-u", sp, cp])
+
+        def stop():
+            proc = getattr(self, "_train_proc", None)
+            if proc is not None:
+                self._train_stopping = True
+                proc.kill()
+
+        def use_it():
+            self._rank_model_path = self._train_result
+            self._save_settings()
+            status.setText(self._tr("train_own_using"))
+            use_btn.setVisible(False)
+
+        start_btn.clicked.connect(start)
+        stop_btn.clicked.connect(stop)
+        use_btn.clicked.connect(use_it)
+        dark_titlebar(dlg)
+        dlg.exec_()
+        if getattr(self, "_train_proc", None) is not None:
+            self._train_stopping = True          # closing the dialog stops it
+            self._train_proc.kill()
+            self._train_proc = None
+
     # -- AI failure reporting -------------------------------------------------
     def _ai_failed(self, key, log):
         """Report a failed AI run properly: a short hint in the status bar plus a
@@ -5334,6 +5705,16 @@ class TrainerWindow(QMainWindow):
         dlg.resize(560, 320)
         dlg.exec_()
 
+    def _label_sources(self):
+        """Every folder to check for pages that are already labelled: the dataset
+        folder plus whatever the user added in Settings → Storage. Ranking drops
+        those pages so you never label the same page twice."""
+        out = []
+        for d in [self._folder] + list(self._label_dirs):
+            if d and os.path.isdir(d) and d not in out:
+                out.append(d)
+        return out
+
     def _rank_model(self):
         """The model used for ranking: the chosen one, else the downloaded shared
         model. '' if neither is usable (a corrupt file counts as missing, so the
@@ -5368,7 +5749,7 @@ class TrainerWindow(QMainWindow):
                 30, 1, 2000)
             if not ok:
                 return
-            cfg = rank_config(model, folder, dataset=self._folder or "")
+            cfg = rank_config(model, folder, datasets=self._label_sources())
             d = tempfile.mkdtemp(prefix="bubblr_rank_")
             sp = os.path.join(d, "rank.py")
             cp = os.path.join(d, "cfg.json")

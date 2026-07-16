@@ -295,16 +295,28 @@ def build_rank_script(cfg):
         "    except Exception:\n"
         "        return None\n"
         "\n"
-        "def _labeled(store):\n"
+        "def _labeled_one(store):\n"
         "    out = set()\n"
-        "    for sub in ('train', 'val'):\n"
-        "        d = os.path.join(store, 'images', sub)\n"
-        "        if os.path.isdir(d):\n"
-        "            for f in os.listdir(d):\n"
+        "    subs = [os.path.join(store, 'images', s) for s in ('train', 'val')]\n"
+        "    subs = [d for d in subs if os.path.isdir(d)]\n"
+        "    if not subs:\n"
+        "        # not a YOLO export -> treat it as a plain folder of pages, so\n"
+        "        # any folder the user points at works\n"
+        "        subs = [store] if os.path.isdir(store) else []\n"
+        "    for d in subs:\n"
+        "        for root, _dirs, files in os.walk(d):\n"
+        "            for f in files:\n"
         "                if f.lower().endswith(EXTS):\n"
-        "                    h = _ahash(os.path.join(d, f))\n"
+        "                    h = _ahash(os.path.join(root, f))\n"
         "                    if h:\n"
         "                        out.add(h)\n"
+        "    return out\n"
+        "\n"
+        "def _labeled(stores):\n"
+        "    out = set()\n"
+        "    for s in stores:\n"
+        "        if s:\n"
+        "            out |= _labeled_one(s)\n"
         "    return out\n"
         "\n"
         "def _run():\n"
@@ -316,7 +328,7 @@ def build_rank_script(cfg):
         "            if f.lower().endswith(EXTS):\n"
         "                imgs.append(os.path.join(root, f))\n"
         "    imgs.sort()\n"
-        "    labeled = _labeled(c['dataset']) if c.get('dataset') else set()\n"
+        "    labeled = _labeled(c.get('datasets') or [])\n"
         "    if labeled:\n"
         "        before = len(imgs)\n"
         "        imgs = [p for p in imgs if _ahash(p) not in labeled]\n"
@@ -343,9 +355,28 @@ def build_rank_script(cfg):
         "    _run()\n")
 
 
-def rank_config(model, folder, imgsz=640, conf=0.25, dataset=""):
+def rank_config(model, folder, imgsz=640, conf=0.25, dataset="", datasets=None):
+    """Config for the ranking script.
+
+    `datasets` is the list of places to look for pages that are already labelled
+    (they get dropped from the ranking). `dataset` is the older single-folder
+    form, still accepted so existing callers keep working."""
+    stores = list(datasets) if datasets else ([dataset] if dataset else [])
+    stores = [s for s in stores if s]
     return {"model": model, "dir": folder, "imgsz": int(imgsz),
-            "conf": float(conf), "dataset": dataset or ""}
+            "conf": float(conf), "datasets": stores,
+            "dataset": stores[0] if stores else ""}
+
+
+def safe_run_name(name, fallback="my-model"):
+    """Turn what the user typed into a name usable as a folder: Ultralytics puts
+    the run in <project>/<name>/, so characters Windows rejects would make the
+    training die with an unhelpful OS error."""
+    out = "".join(ch if (ch.isalnum() or ch in "-_. ") else "-"
+                  for ch in (name or "").strip())
+    out = "-".join(out.split())              # collapse whitespace
+    out = out.strip("-. ")
+    return out[:60] or fallback
 
 
 def read_yaml_summary(path):

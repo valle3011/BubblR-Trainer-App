@@ -381,6 +381,78 @@ LANG = {
         "py_install_none": "No Python found to install into. Click 'Get Python', "
                            "install Python 3, then press Find.",
         "py_install_close": "Close",
+        # -- Settings → Storage: where to look for already-labelled pages --
+        "lbl_src_title": "Where to look for pages you already labelled",
+        "lbl_src_hint": "When you rank a folder of raw pages, BubblR skips the "
+                        "ones you have labelled before, so you never do the same "
+                        "page twice. It always checks your dataset folder. Add "
+                        "more folders here — an older dataset, or a helper's "
+                        "export. Pages are matched by how they look, so a "
+                        "re-saved JPG/PNG is still recognised.",
+        "lbl_src_dataset": "Dataset folder (always checked): {p}",
+        "lbl_src_dataset_none": "Dataset folder (always checked): none chosen yet",
+        "lbl_src_add": "Add folder…",
+        "lbl_src_remove": "Remove selected",
+        "lbl_src_pick": "Choose a folder with pages you already labelled",
+        "lbl_src_none": "No extra folders — only the dataset folder is checked.",
+        "lbl_src_dupe": "That folder is already in the list.",
+        # -- Train your own model (in-app) --
+        "mi_train_own": "Train your own model…",
+        "train_own_title": "Train your own model",
+        "train_own_intro": "This teaches a model on the pages you labelled. It "
+                           "runs on your PC and can take a while — minutes on a "
+                           "GPU, longer on the CPU. You can keep working while "
+                           "it runs.",
+        "train_own_name": "Model name:",
+        "train_own_name_hint": "The name of your model, e.g. 'my-bubbles-v1'. "
+                               "It becomes the folder name of the result, so "
+                               "give each attempt its own name to keep the old "
+                               "one.",
+        "train_own_out": "Save to:",
+        "train_own_out_hint": "The folder your trained model is written to. You "
+                              "get <folder>/<name>/weights/best.pt — that file "
+                              "IS your model.",
+        "train_own_data": "Learn from:",
+        "train_own_data_hint": "The labelled pages it learns from — your "
+                               "exported dataset. Export first (File → Export "
+                               "all), otherwise there is nothing to learn.",
+        "train_own_base": "Start from:",
+        "train_own_base_hint": "What to build on. 'Shared BubblR model' keeps "
+                               "what BubblR already knows and just adds your "
+                               "pages — usually the best choice. A plain YOLO "
+                               "base starts from scratch and needs many more "
+                               "pages. Or continue from a model of your own.",
+        "train_own_base_shared": "Shared BubblR model (recommended)",
+        "train_own_base_yolo": "YOLO11 nano (small & fast, from scratch)",
+        "train_own_base_yolos": "YOLO11 small (slower, a bit better)",
+        "train_own_base_custom": "Continue from my own model file…",
+        "train_own_epochs": "Rounds (epochs):",
+        "train_own_epochs_hint": "How often it goes through all your pages. More "
+                                 "rounds = better, up to a point, and slower. "
+                                 "100 is a good start.",
+        "train_own_imgsz": "Image size:",
+        "train_own_imgsz_hint": "How large pages are scaled before learning. "
+                                "Bigger catches small text but needs more "
+                                "memory. Lower this to 512 if you run out of "
+                                "memory.",
+        "train_own_start": "Start training",
+        "train_own_stop": "Stop",
+        "train_own_running": "Training… round {c} of {t}",
+        "train_own_starting": "Starting — loading the model…",
+        "train_own_done": "Done. Your model: {p}",
+        "train_own_fail": "Training failed.",
+        "train_own_stopped": "Training stopped.",
+        "train_own_use": "Use this model for AI-detect",
+        "train_own_using": "AI-detect now uses your model.",
+        "train_own_need_data": "No labelled pages found. Choose a dataset folder "
+                               "in Settings → Storage and export your pages "
+                               "first (File → Export all).",
+        "train_own_need_py": "The AI isn't set up yet. Settings → Experimental → "
+                             "Install Ultralytics, then try again.",
+        "train_own_pick_base": "Choose a model file to continue from",
+        "train_own_pick_out": "Where should the trained model be saved?",
+        "train_own_close": "Close",
+        "train_own_busy": "Training is already running.",
         "update_mode_auto": "Automatic",
         "update_mode_manual": "Manual",
         "update_mode_hint": "Automatic: a newer version is downloaded in the "
@@ -881,6 +953,87 @@ LANG = {
         "py_install_none": "Kein Python zum Installieren gefunden. Klicke "
                            "„Python holen“, installiere Python 3, dann „Finden“.",
         "py_install_close": "Schließen",
+        # -- Einstellungen → Speicherort: wo nach gelabelten Seiten gesucht wird --
+        "lbl_src_title": "Wo nach schon gelabelten Seiten gesucht wird",
+        "lbl_src_hint": "Beim Ranken eines Ordners mit Rohseiten überspringt "
+                        "BubblR die Seiten, die du schon gelabelt hast — so "
+                        "machst du keine Seite doppelt. Dein Dataset-Ordner wird "
+                        "immer geprüft. Hier kannst du weitere Ordner "
+                        "hinzufügen: einen älteren Datensatz oder den Export "
+                        "eines Helfers. Erkannt wird am Aussehen der Seite, ein "
+                        "neu gespeichertes JPG/PNG wird also trotzdem gefunden.",
+        "lbl_src_dataset": "Dataset-Ordner (immer geprüft): {p}",
+        "lbl_src_dataset_none": "Dataset-Ordner (immer geprüft): noch keiner "
+                                "gewählt",
+        "lbl_src_add": "Ordner hinzufügen…",
+        "lbl_src_remove": "Ausgewählten entfernen",
+        "lbl_src_pick": "Ordner mit schon gelabelten Seiten wählen",
+        "lbl_src_none": "Keine zusätzlichen Ordner — nur der Dataset-Ordner wird "
+                        "geprüft.",
+        "lbl_src_dupe": "Dieser Ordner steht bereits in der Liste.",
+        # -- Eigenes Modell trainieren (in der App) --
+        "mi_train_own": "Eigenes Modell trainieren…",
+        "train_own_title": "Eigenes Modell trainieren",
+        "train_own_intro": "Das bringt einem Modell deine gelabelten Seiten bei. "
+                           "Es läuft auf deinem PC und dauert etwas — Minuten "
+                           "auf einer GPU, länger auf der CPU. Du kannst "
+                           "nebenher weiterarbeiten.",
+        "train_own_name": "Modellname:",
+        "train_own_name_hint": "Der Name deines Modells, z. B. „meine-bubbles-v1“. "
+                               "Er wird zum Ordnernamen des Ergebnisses — gib "
+                               "jedem Versuch einen eigenen Namen, dann bleibt "
+                               "der alte erhalten.",
+        "train_own_out": "Speichern in:",
+        "train_own_out_hint": "Der Ordner, in den dein trainiertes Modell "
+                              "geschrieben wird. Du bekommst "
+                              "<Ordner>/<Name>/weights/best.pt — diese Datei IST "
+                              "dein Modell.",
+        "train_own_data": "Lernt aus:",
+        "train_own_data_hint": "Die gelabelten Seiten, aus denen gelernt wird — "
+                               "dein exportierter Datensatz. Exportiere zuerst "
+                               "(Datei → Alle exportieren), sonst gibt es nichts "
+                               "zu lernen.",
+        "train_own_base": "Startet von:",
+        "train_own_base_hint": "Worauf aufgebaut wird. „Geteiltes BubblR-Modell“ "
+                               "behält, was BubblR schon kann, und ergänzt nur "
+                               "deine Seiten — meist die beste Wahl. Eine reine "
+                               "YOLO-Basis fängt bei null an und braucht viel "
+                               "mehr Seiten. Oder mach mit einem eigenen Modell "
+                               "weiter.",
+        "train_own_base_shared": "Geteiltes BubblR-Modell (empfohlen)",
+        "train_own_base_yolo": "YOLO11 nano (klein & schnell, von null)",
+        "train_own_base_yolos": "YOLO11 small (langsamer, etwas besser)",
+        "train_own_base_custom": "Mit eigenem Modell weitermachen…",
+        "train_own_epochs": "Durchgänge (Epochen):",
+        "train_own_epochs_hint": "Wie oft alle deine Seiten durchlaufen werden. "
+                                 "Mehr Durchgänge = besser, bis zu einem Punkt, "
+                                 "und langsamer. 100 ist ein guter Start.",
+        "train_own_imgsz": "Bildgröße:",
+        "train_own_imgsz_hint": "Auf welche Größe die Seiten vor dem Lernen "
+                                "skaliert werden. Größer erkennt kleine Schrift "
+                                "besser, braucht aber mehr Speicher. Bei "
+                                "Speicherproblemen auf 512 senken.",
+        "train_own_start": "Training starten",
+        "train_own_stop": "Stopp",
+        "train_own_running": "Training… Durchgang {c} von {t}",
+        "train_own_starting": "Start — Modell wird geladen…",
+        "train_own_done": "Fertig. Dein Modell: {p}",
+        "train_own_fail": "Training fehlgeschlagen.",
+        "train_own_stopped": "Training abgebrochen.",
+        "train_own_use": "Dieses Modell für KI-Erkennung nutzen",
+        "train_own_using": "Die KI-Erkennung nutzt jetzt dein Modell.",
+        "train_own_need_data": "Keine gelabelten Seiten gefunden. Wähle unter "
+                               "Einstellungen → Speicherort einen Dataset-Ordner "
+                               "und exportiere zuerst deine Seiten (Datei → Alle "
+                               "exportieren).",
+        "train_own_need_py": "Die KI ist noch nicht eingerichtet. Einstellungen → "
+                             "Experimentell → „Ultralytics installieren“, dann "
+                             "erneut versuchen.",
+        "train_own_pick_base": "Modelldatei wählen, mit der weitergemacht wird",
+        "train_own_pick_out": "Wohin soll das trainierte Modell gespeichert "
+                              "werden?",
+        "train_own_close": "Schließen",
+        "train_own_busy": "Es läuft bereits ein Training.",
         "update_mode_auto": "Automatisch",
         "update_mode_manual": "Manuell",
         "update_mode_hint": "Automatisch: eine neuere Version wird im Hintergrund "

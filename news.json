@@ -1,8 +1,20 @@
 {
-  "latest_version": "0.9.27",
+  "latest_version": "0.9.28",
   "model_trainer_version": "0.4.3",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-14",
+      "title": "Train your own model, without the second app",
+      "text": "Tools → Train your own model… trains a model on the pages you labelled, right inside BubblR Trainer. You give it a name and pick where it is saved — you get <folder>/<name>/weights/best.pt, and that file IS your model. Choose what it starts from (the shared BubblR model is usually best: it keeps what BubblR already knows and just adds your pages), how many rounds it runs, and the image size. Every field explains what it does in plain words. The log and a progress bar show what's happening, you can stop at any time, and one button makes AI-detect use your new model. The Model Trainer is still there for the full set of knobs.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
+    {
+      "date": "2026-07-14",
+      "title": "Choose where BubblR looks for pages you already labelled",
+      "text": "Ranking skips pages you have labelled before so you never do the same page twice. It used to check only your current dataset folder. Settings → Storage location now lets you add more folders — an older dataset, or a helper's export — and they are all checked together. Pages are matched by how they look, so a re-saved JPG or PNG under a different name is still recognised.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-14",
       "title": "Install Ultralytics straight from Settings",
