@@ -83,7 +83,7 @@ def _ver_tuple(v):
             out.append(0)
     return tuple(out)
 
-VERSION = "0.4.4"
+VERSION = "0.4.5"
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".bubblr_model_trainer.json")
 SHORTCUT_MARK = os.path.join(os.path.expanduser("~"),
                              ".bubblr_model_trainer_shortcut")
@@ -98,6 +98,27 @@ SEGMENT_MODELS = ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt",
                   "yolov8s-seg.pt", "yolov8m-seg.pt", "yolov8l-seg.pt",
                   "yolov8x-seg.pt"]
 CUSTOM_LABEL = "Custom model file… (continue training)"
+
+# Defaults that turned out to be wrong get migrated once, so that a saved copy
+# of the OLD default doesn't keep biting people who never chose it. Bump this
+# when adding a migration to _migrate_defaults().
+DEFAULTS_VERSION = 1
+OLD_DEFAULT_BATCH = 16                            # pre-0.4.4 default
+
+
+def _migrate_defaults(cfg):
+    """Move settings written by an older version onto the new defaults.
+
+    batch=16 was the default until 0.4.4, and it guesses: it runs out of GPU
+    memory as soon as anything else is using the card. -1 measures instead. Only
+    the exact old default is migrated — a number the user picked themselves is
+    theirs to keep."""
+    if cfg.get("defaults_version", 0) >= DEFAULTS_VERSION:
+        return cfg
+    if cfg.get("batch") == OLD_DEFAULT_BATCH:
+        cfg["batch"] = -1
+    cfg["defaults_version"] = DEFAULTS_VERSION
+    return cfg
 
 
 # --------------------------------------------------------------------------- #
@@ -236,8 +257,15 @@ class TrainerWindow(QMainWindow):
         self.imgsz.setValue(int(cfg.get("imgsz", 640)))
         self.batch = QSpinBox()
         self.batch.setRange(-1, 512)
-        self.batch.setValue(int(cfg.get("batch", 16)))
-        self.batch.setToolTip("-1 lets Ultralytics auto-pick the batch size")
+        # -1 by default: AutoBatch measures what the card actually has free and
+        # picks a size that fits. A fixed number guesses, and guesses wrong as
+        # soon as anything else is using the GPU.
+        self.batch.setValue(int(cfg.get("batch", -1)))
+        self.batch.setSpecialValueText("-1 (auto)")
+        self.batch.setToolTip(
+            "-1 lets Ultralytics measure the free GPU memory and pick the batch "
+            "size that fits — recommended. A fixed number can run out of memory "
+            "when other programs are using the GPU.")
         self.device = QComboBox()
         self.device.addItems(["auto", "cpu", "0", "1"])
         self.device.setCurrentText(cfg.get("device", "auto"))
@@ -912,7 +940,7 @@ class TrainerWindow(QMainWindow):
     def _load(self):
         try:
             with open(SETTINGS_FILE, encoding="utf-8") as fh:
-                return json.load(fh)
+                return _migrate_defaults(json.load(fh))
         except Exception:                        # noqa: BLE001
             return {}
 
@@ -924,6 +952,7 @@ class TrainerWindow(QMainWindow):
                 "custom_model": self.custom_edit.text().strip(),
                 "epochs": self.epochs.value(), "imgsz": self.imgsz.value(),
                 "batch": self.batch.value(),
+                "defaults_version": DEFAULTS_VERSION,
                 "device": self.device.currentText(),
                 "name": self.run_name.text().strip(),
                 "patience": self.patience.value(),

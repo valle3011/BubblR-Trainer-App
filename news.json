@@ -1,8 +1,14 @@
 {
   "latest_version": "0.9.29",
-  "model_trainer_version": "0.4.4",
+  "model_trainer_version": "0.4.5",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-16",
+      "title": "Model Trainer: Batch is -1 (auto) by default now",
+      "text": "Batch defaulted to 16, which is a guess — and it runs out of GPU memory as soon as anything else is using the card (a wallpaper engine, a browser and a music player can easily hold half of it). -1 lets Ultralytics measure what is actually free and pick a size that fits. If your saved settings still carry the old default of 16 it is moved to -1 once; a number you picked yourself is left alone.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-16",
       "title": "Fixed: training died with 'WinError 1455' after several minutes",
