@@ -453,6 +453,30 @@ LANG = {
         "train_own_pick_out": "Where should the trained model be saved?",
         "train_own_close": "Close",
         "train_own_busy": "Training is already running.",
+        # -- compare the result against an older model --
+        "train_own_cmp": "Compare with:",
+        "train_own_cmp_hint": "When training is done, the old model and your new "
+                              "one are scored on the same pages, so you can see "
+                              "whether it actually got better instead of "
+                              "guessing. Costs an extra minute at the end.",
+        "train_own_cmp_start": "The model I started from (recommended)",
+        "train_own_cmp_shared": "The shared BubblR model",
+        "train_own_cmp_pick": "Choose a model file…",
+        "train_own_cmp_none": "Don't compare (finishes sooner)",
+        "train_own_pick_cmp": "Choose the model to compare against",
+        "train_own_cmp_running": "Scoring the old model on the same pages…",
+        "train_own_cmp_better": "Your model is BETTER: {new} vs {old} ({d}).",
+        "train_own_cmp_worse": "Your model is worse: {new} vs {old} ({d}). Keep "
+                               "the old one, or label more pages and retry.",
+        "train_own_cmp_same": "No real change: {new} vs {old} ({d}).",
+        "train_own_cmp_fail": "Could not compare with the old model — your "
+                              "trained model is fine, only the comparison "
+                              "failed.",
+        "train_own_cmp_scale": "(score = mAP50-95, higher is better, 0 to 1)",
+        "train_own_cmp_untrained": "Note: a plain YOLO base has never seen your "
+                                   "classes, so it scores near 0 and your model "
+                                   "wins automatically. Compare against a BubblR "
+                                   "model for a meaningful result.",
         "update_mode_auto": "Automatic",
         "update_mode_manual": "Manual",
         "update_mode_hint": "Automatic: a newer version is downloaded in the "
@@ -1034,6 +1058,33 @@ LANG = {
                               "werden?",
         "train_own_close": "Schließen",
         "train_own_busy": "Es läuft bereits ein Training.",
+        # -- Ergebnis mit einem älteren Modell vergleichen --
+        "train_own_cmp": "Vergleichen mit:",
+        "train_own_cmp_hint": "Nach dem Training werden das alte und dein neues "
+                              "Modell auf denselben Seiten bewertet — so siehst "
+                              "du, ob es wirklich besser geworden ist, statt zu "
+                              "raten. Kostet am Ende eine Minute extra.",
+        "train_own_cmp_start": "Dem Modell, von dem ich gestartet bin (empfohlen)",
+        "train_own_cmp_shared": "Dem geteilten BubblR-Modell",
+        "train_own_cmp_pick": "Modelldatei wählen…",
+        "train_own_cmp_none": "Nicht vergleichen (ist schneller fertig)",
+        "train_own_pick_cmp": "Modell wählen, mit dem verglichen wird",
+        "train_own_cmp_running": "Altes Modell wird auf denselben Seiten "
+                                 "bewertet…",
+        "train_own_cmp_better": "Dein Modell ist BESSER: {new} statt {old} ({d}).",
+        "train_own_cmp_worse": "Dein Modell ist schlechter: {new} statt {old} "
+                               "({d}). Behalte das alte, oder labele mehr Seiten "
+                               "und versuch es erneut.",
+        "train_own_cmp_same": "Kein echter Unterschied: {new} statt {old} ({d}).",
+        "train_own_cmp_fail": "Vergleich mit dem alten Modell nicht möglich — "
+                              "dein trainiertes Modell ist in Ordnung, nur der "
+                              "Vergleich ist fehlgeschlagen.",
+        "train_own_cmp_scale": "(Wert = mAP50-95, höher ist besser, 0 bis 1)",
+        "train_own_cmp_untrained": "Hinweis: Eine reine YOLO-Basis kennt deine "
+                                   "Klassen nicht, erreicht also fast 0 — dein "
+                                   "Modell gewinnt automatisch. Für ein "
+                                   "aussagekräftiges Ergebnis mit einem "
+                                   "BubblR-Modell vergleichen.",
         "update_mode_auto": "Automatisch",
         "update_mode_manual": "Manuell",
         "update_mode_hint": "Automatisch: eine neuere Version wird im Hintergrund "

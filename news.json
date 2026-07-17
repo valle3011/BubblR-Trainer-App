@@ -1,8 +1,14 @@
 {
-  "latest_version": "0.9.31",
+  "latest_version": "0.9.32",
   "model_trainer_version": "0.4.5",
   "url": "https://github.com/valle3011/BubblR-Trainer-App/releases",
   "items": [
+    {
+      "date": "2026-07-16",
+      "title": "Train your own model: see whether it actually got better",
+      "text": "The train dialog can now compare the result against an older model — the one you started from, the shared BubblR model, or any .pt file of your own. When training finishes, both are scored on the same pages and you get a verdict in plain words: better, worse, or no real change, with the numbers (mAP50-95, higher is better). Small differences are called noise rather than progress, so a run that changed nothing says so. Pick 'Don't compare' to skip the extra minute.",
+      "url": "https://github.com/valle3011/BubblR-Trainer-App/releases"
+    },
     {
       "date": "2026-07-16",
       "title": "Model Trainer: Batch is -1 (auto) by default now",

@@ -47,7 +47,8 @@ from bubblr_train_core import (MODEL_URL, MODEL_META_URL, model_path,
                                probe_ai_python, is_valid_model, diagnose_error,
                                VCREDIST_URL, pip_install_args, strip_ansi,
                                build_train_script, train_config, check_dataset,
-                               parse_progress, safe_run_name)
+                               parse_progress, safe_run_name, build_val_script,
+                               val_config, read_run_metric)
 
 
 class AiModelFetcher(QThread):
@@ -79,7 +80,7 @@ class AiModelFetcher(QThread):
             self.done.emit(None)
 
 
-VERSION = "0.9.31"
+VERSION = "0.9.32"
 # Bump when the DEFAULT dock layout changes so existing users get the new
 # arrangement once (their saved dock state is ignored for that one launch).
 LAYOUT_VERSION = 2
@@ -5431,6 +5432,42 @@ class TrainerWindow(QMainWindow):
 
         base_combo.currentIndexChanged.connect(on_base)
 
+        # what to compare the result against, so "did this help?" is answered
+        # with a number instead of a feeling
+        row = QHBoxLayout()
+        row.addWidget(QLabel(self._tr("train_own_cmp")))
+        cmp_combo = QComboBox()
+        cmp_combo.addItem(self._tr("train_own_cmp_start"), "__base__")
+        if is_valid_model(model_path()):
+            cmp_combo.addItem(self._tr("train_own_cmp_shared"), "__shared__")
+        cmp_combo.addItem(self._tr("train_own_cmp_pick"), "__pick__")
+        cmp_combo.addItem(self._tr("train_own_cmp_none"), "")
+        row.addWidget(cmp_combo, 1)
+        v.addLayout(row)
+        cmp_lbl = QLabel()
+        cmp_lbl.setStyleSheet("color: gray;")
+        cmp_lbl.setWordWrap(True)
+        cmp_lbl.setVisible(False)
+        v.addWidget(cmp_lbl)
+        v.addWidget(hint("train_own_cmp_hint"))
+        self._cmp_pick = ""
+
+        def on_cmp(_i):
+            if cmp_combo.currentData() != "__pick__":
+                cmp_lbl.setVisible(False)
+                return
+            p, _ = QFileDialog.getOpenFileName(
+                dlg, self._tr("train_own_pick_cmp"), self._start_dir(),
+                "PyTorch weights (*.pt)")
+            if p:
+                self._cmp_pick = p
+                cmp_lbl.setText(p)
+                cmp_lbl.setVisible(True)
+            else:
+                cmp_combo.setCurrentIndex(0)
+
+        cmp_combo.currentIndexChanged.connect(on_cmp)
+
         # epochs + image size
         row = QHBoxLayout()
         row.addWidget(QLabel(self._tr("train_own_epochs")))
@@ -5509,6 +5546,13 @@ class TrainerWindow(QMainWindow):
                 json.dump(cfg, f)
             self._train_log = ""
             self._train_result = os.path.join(out, name, "weights", "best.pt")
+            self._train_run_dir = os.path.join(out, name)
+            # resolve the comparison model NOW: the combo is gone by the time
+            # training ends, and "the one I started from" means the base as it
+            # was at the start
+            pick = cmp_combo.currentData()
+            self._train_cmp = {"__base__": base, "__shared__": model_path(),
+                               "__pick__": self._cmp_pick}.get(pick, "")
             for w in (start_btn,):
                 w.setVisible(False)
             stop_btn.setVisible(True)
@@ -5551,6 +5595,8 @@ class TrainerWindow(QMainWindow):
                                    .format(p=self._train_result))
                     status.setStyleSheet("color:#7ec87e;font-weight:bold;")
                     use_btn.setVisible(True)
+                    if self._train_cmp and os.path.isfile(self._train_cmp):
+                        self._compare_to_baseline(dlg, log, status, py, data)
                 else:
                     status.setText(self._tr("train_own_fail"))
                     status.setStyleSheet("color:#e06c6c;font-weight:bold;")
@@ -5586,6 +5632,86 @@ class TrainerWindow(QMainWindow):
             self._train_stopping = True          # closing the dialog stops it
             self._train_proc.kill()
             self._train_proc = None
+        if getattr(self, "_val_proc", None) is not None:
+            self._val_proc.kill()                # same for the comparison pass
+            self._val_proc = None
+
+    def _compare_to_baseline(self, dlg, log, status, py, data):
+        """Score the old model on the SAME pages as the new one and report which
+        is better. Without this, "is it actually improving?" is a feeling; the
+        number (mAP50-95) settles it.
+
+        The new model's score comes from its own run (results.csv), so only the
+        old one has to be measured — one extra validation pass."""
+        base = self._train_cmp
+        new = read_run_metric(getattr(self, "_train_run_dir", "") or "")
+        if new is None:                          # no results.csv -> nothing to
+            log.append("\n" + self._tr("train_own_cmp_fail"))   # compare against
+            return
+        cfg = val_config(base, data, self._train_imgsz)
+        d = tempfile.mkdtemp(prefix="bubblr_val_")
+        sp, cp = os.path.join(d, "val.py"), os.path.join(d, "cfg.json")
+        with open(sp, "w", encoding="utf-8") as f:
+            f.write(build_val_script(cfg))
+        with open(cp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+        status.setText(self._tr("train_own_cmp_running"))
+        status.setStyleSheet("")
+        log.append("\n" + self._tr("train_own_cmp_running"))
+        proc = QProcess(dlg)
+        self._val_proc = proc
+        self._val_out = None
+        self._val_log = ""
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+
+        def on_out():
+            txt = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+            self._val_log += txt
+            for line in txt.splitlines():
+                line = strip_ansi(line)
+                if line.strip():
+                    log.append(line)
+                if line.startswith("BUBBLR_VAL"):
+                    try:
+                        self._val_out = float(line.split()[1])
+                    except (ValueError, IndexError):
+                        self._val_out = None
+
+        def on_fin(code, _s):
+            self._val_proc = None
+            old = self._val_out
+            if code != 0 or old is None:
+                status.setText(self._tr("train_own_cmp_fail"))
+                status.setStyleSheet("color:#e0a06c;")
+                h = diagnose_error(self._val_log)
+                if h:
+                    log.append("\n" + h)
+                return
+            diff = new - old
+            # mAP moves in small steps; below a point it is noise, not progress
+            if abs(diff) < 0.005:
+                key, colour = "train_own_cmp_same", "#c8c87e"
+            elif diff > 0:
+                key, colour = "train_own_cmp_better", "#7ec87e"
+            else:
+                key, colour = "train_own_cmp_worse", "#e06c6c"
+            msg = self._tr(key).format(new="%.3f" % new, old="%.3f" % old,
+                                       d="%+.3f" % diff)
+            status.setText(msg + "  " + self._tr("train_own_cmp_scale"))
+            status.setStyleSheet("color:%s;font-weight:bold;" % colour)
+            log.append("\n" + msg)
+            # a plain YOLO base never saw these classes, so it scores ~0 and the
+            # comparison flatters the new model — say so rather than let it read
+            # as a real win
+            if old < 0.01 and os.path.basename(base).startswith(("yolo11",
+                                                                 "yolov8")):
+                log.append(self._tr("train_own_cmp_untrained"))
+
+        proc.readyReadStandardOutput.connect(on_out)
+        proc.finished.connect(on_fin)
+        proc.errorOccurred.connect(
+            lambda _e: status.setText(self._tr("train_own_cmp_fail")))
+        proc.start(py, ["-u", sp, cp])
 
     # -- AI failure reporting -------------------------------------------------
     def _ai_failed(self, key, log):
